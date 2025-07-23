@@ -42,6 +42,16 @@ public class UserService {
             return error("Email already registered");
         }
 
+        // Determine role - default to USER if not specified or invalid
+        string role = "USER";
+        if (request.role is string) {
+            string requestedRole = <string>request.role;
+            // Only allow valid roles
+            if (requestedRole == "ADMIN" || requestedRole == "USER") {
+                role = requestedRole;
+            }
+        }
+
         // Create user
         string id = uuid:createType1AsString();
         string hashedPassword = check hashPassword(request.password);
@@ -51,13 +61,13 @@ public class UserService {
             email: request.email,
             passwordHash: hashedPassword,
             name: request.name,
-            role: "USER",
+            role: role,  // Use the determined role
             createdAt: time:utcToString(time:utcNow())
         };
 
         // Save user
         check self.userCollection->insertOne(newUser);
-        log:printInfo("User registered successfully: " + id);
+        log:printInfo("User registered successfully: " + id + " with role: " + role);
 
         // Generate JWT token
         string token = check generateJwt(newUser.id, newUser.email, newUser.name, newUser.role);
@@ -108,7 +118,7 @@ public class UserService {
             return error("Invalid email or password");
         }
 
-        log:printInfo("User logged in successfully: " + user.id);
+        log:printInfo("User logged in successfully: " + user.id + " with role: " + user.role);
 
         // Generate JWT token
         string token = check generateJwt(user.id, user.email, user.name, user.role);
@@ -170,5 +180,43 @@ public class UserService {
             };
 
         return users;
+    }
+    
+    # Get all users (admin function)
+    #
+    # + return - Array of all users
+    public function getAllUsers() returns UserResponse[]|error {
+        stream<User, error?> userStream = check self.userCollection->find({});
+        
+        UserResponse[] users = [];
+        check from User user in userStream
+            do {
+                users.push({
+                    id: user.id,
+                    email: user.email,
+                    name: user.name,
+                    role: user.role
+                });
+            };
+        
+        return users;
+    }
+    
+    # Check if a user has admin role
+    #
+    # + userId - User ID to check
+    # + return - True if admin, error if not admin or user not found
+    public function checkAdminRole(string userId) returns boolean|error {
+        User? user = check self.findUserById(userId);
+        
+        if user is () {
+            return error("User not found");
+        }
+        
+        if user.role != "ADMIN" {
+            return error("Admin privileges required");
+        }
+        
+        return true;
     }
 }
