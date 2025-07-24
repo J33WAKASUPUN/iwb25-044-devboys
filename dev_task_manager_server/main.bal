@@ -1,12 +1,16 @@
 // main.bal
 import ballerina/http;
 import ballerina/log;
-import ballerina/os;
 import ballerinax/mongodb;
 
-// MongoDB configuration
-final string mongoUri = os:getEnv("MONGODB_URI");
-final string dbName = os:getEnv("DB_NAME");
+// MongoDB configuration using configurable values
+configurable string mongodb_uri = ?;
+configurable string db_name = ?;
+configurable string jwt_secret = ?;
+
+// Define variables used throughout the code
+final string mongoUri = mongodb_uri;
+final string dbName = db_name;
 
 // Service configuration
 service / on new http:Listener(9090) {
