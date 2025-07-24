@@ -35,6 +35,12 @@ public class TaskService {
             return error("Due date is required");
         }
 
+        // Validate date format and calendar validity
+        DateValidationError? dateError = validateDate(request.dueDate);
+        if (dateError is DateValidationError) {
+            return error(dateError.message);
+        }
+
         // Validate assignee if provided
         if (request.assignedTo is string) {
             string assigneeId = <string>request.assignedTo;
@@ -42,6 +48,17 @@ public class TaskService {
 
             if assignee is () {
                 return error("Assigned user not found");
+            }
+        }
+
+        // Get user timezone or use provided timezone
+        UserResponse userProfile = check self.userService.getUserProfile(userId);
+        string taskTimezone = userProfile.timezone;
+        
+        if (request.timezone is string) {
+            string requestedTimezone = <string>request.timezone;
+            if (validTimezones.indexOf(requestedTimezone) != -1) {
+                taskTimezone = requestedTimezone;
             }
         }
 
@@ -59,7 +76,8 @@ public class TaskService {
             createdBy: userId,
             assignedTo: request.assignedTo,
             createdAt: currentTime,
-            updatedAt: currentTime
+            updatedAt: currentTime,
+            timezone: taskTimezone
         };
 
         // Save task
@@ -106,8 +124,17 @@ public class TaskService {
             updateDoc["status"] = <string>request.status;
         }
 
+        // Validate due date if provided
         if (request.dueDate is string) {
-            updateDoc["dueDate"] = <string>request.dueDate;
+            string dueDate = <string>request.dueDate;
+            
+            // Validate date format and calendar validity
+            DateValidationError? dateError = validateDate(dueDate);
+            if (dateError is DateValidationError) {
+                return error(dateError.message);
+            }
+            
+            updateDoc["dueDate"] = dueDate;
         }
 
         if (request.priority is TaskPriority) {
@@ -124,6 +151,16 @@ public class TaskService {
             }
 
             updateDoc["assignedTo"] = assigneeId;
+        }
+        
+        // Update timezone if provided
+        if (request.timezone is string) {
+            string requestedTimezone = <string>request.timezone;
+            if (validTimezones.indexOf(requestedTimezone) != -1) {
+                updateDoc["timezone"] = requestedTimezone;
+            } else {
+                return error("Invalid timezone specified");
+            }
         }
 
         // Add updated timestamp
@@ -213,6 +250,23 @@ public class TaskService {
             filter["createdBy"] = <string>filters.createdBy;
         }
 
+        // Validate date range filters
+        if (filters.startDate is string) {
+            string startDate = <string>filters.startDate;
+            DateValidationError? dateError = validateDate(startDate);
+            if (dateError is DateValidationError) {
+                return error("Invalid start date: " + dateError.message);
+            }
+        }
+        
+        if (filters.endDate is string) {
+            string endDate = <string>filters.endDate;
+            DateValidationError? dateError = validateDate(endDate);
+            if (dateError is DateValidationError) {
+                return error("Invalid end date: " + dateError.message);
+            }
+        }
+
         // Date range filter
         if (filters.startDate is string && filters.endDate is string) {
             filter["dueDate"] = {
@@ -279,6 +333,9 @@ public class TaskService {
         if (task.assignedTo is string) {
             assignee = check self.userService.getUserProfile(<string>task.assignedTo);
         }
+        
+        // Check if task is overdue based on current date
+        boolean overdue = isTaskOverdue(task.dueDate, <string>task.status);
 
         return {
             id: task.id,
@@ -290,7 +347,9 @@ public class TaskService {
             createdBy: creator,
             assignedTo: assignee,
             createdAt: task.createdAt,
-            updatedAt: task.updatedAt
+            updatedAt: task.updatedAt,
+            timezone: task.timezone,
+            isOverdue: overdue
         };
     }
 
@@ -326,7 +385,16 @@ public class TaskService {
         int lowPriorityCount = 0;
 
         int overdueCount = 0;
-        string currentDate = time:utcToString(time:utcNow()).substring(0, 10); // YYYY-MM-DD
+        
+        // Get current date for overdue calculation
+        string currentDate;
+        if (currentSystemDate != "") {
+            currentDate = currentSystemDate;
+        } else {
+            currentDate = time:utcToString(time:utcNow()).substring(0, 10); // YYYY-MM-DD
+        }
+        
+        log:printInfo("Using current date for statistics: " + currentDate);
 
         // Process tasks
         error? err = from Task task in taskStream
@@ -410,28 +478,7 @@ public class TaskService {
                 if (task.title.toLowerAscii().includes(lowercaseQuery) ||
                 task.description.toLowerAscii().includes(lowercaseQuery)) {
 
-                    // Get creator info
-                    UserResponse creator = check self.userService.getUserProfile(task.createdBy);
-
-                    // Get assignee info if present
-                    UserResponse? assignee = ();
-                    if (task.assignedTo is string) {
-                        assignee = check self.userService.getUserProfile(<string>task.assignedTo);
-                    }
-
-                    TaskResponse response = {
-                        id: task.id,
-                        title: task.title,
-                        description: task.description,
-                        status: <string>task.status,
-                        dueDate: task.dueDate,
-                        priority: <string>task.priority,
-                        createdBy: creator,
-                        assignedTo: assignee,
-                        createdAt: task.createdAt,
-                        updatedAt: task.updatedAt
-                    };
-
+                    TaskResponse response = check self.convertTaskToResponse(task);
                     responses.push(response);
                 }
             };

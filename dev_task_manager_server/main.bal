@@ -488,4 +488,21 @@ service / on new http:Listener(9090) {
         // Search tasks with appropriate permissions
         return self.taskService.searchTasks(userId, query, isAdmin);
     }
+
+    # Update user timezone
+    #
+    # + req - HTTP request with auth token
+    # + timezone - New timezone value
+    # + return - Updated user profile or error
+    resource function put profile/timezone(http:Request req, string timezone) returns UserResponse|error {
+        // Check authentication
+        string|error userId = extractUserIdFromToken(req);
+
+        if userId is error {
+            return error("Authentication required");
+        }
+
+        // Update the timezone
+        return self.userService.updateUserTimezone(userId, timezone);
+    }
 }

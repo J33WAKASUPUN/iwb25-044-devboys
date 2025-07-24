@@ -7,11 +7,13 @@
 # + password - User password (min 6 characters)
 # + name - User's full name
 # + role - User role (optional, defaults to USER)
+# + timezone - User's timezone (optional, defaults to UTC)
 public type RegisterRequest record {|
     string email;
     string password;
     string name;
     string? role = (); // Added optional role field
+    string? timezone = (); // Added optional timezone field
 |};
 
 # Login request
@@ -31,6 +33,7 @@ public type LoginRequest record {|
 # + name - User's full name
 # + role - User role (USER, ADMIN, etc.)
 # + createdAt - Account creation timestamp
+# + timezone - User's timezone
 public type User record {|
     readonly string id;
     string email;
@@ -38,6 +41,7 @@ public type User record {|
     string name;
     string role;
     string createdAt;
+    string timezone = "UTC"; // Default timezone
 |};
 
 # User response
@@ -46,11 +50,13 @@ public type User record {|
 # + email - User email address
 # + name - User's full name
 # + role - User role
+# + timezone - User's timezone
 public type UserResponse record {|
     string id;
     string email;
     string name;
     string role;
+    string timezone;
 |};
 
 # Authentication response
@@ -84,12 +90,13 @@ public enum TaskPriority {
 # + title - Task title
 # + description - Task description
 # + status - Current task status
-# + dueDate - Due date in ISO format
+# + dueDate - Due date in ISO format (YYYY-MM-DD)
 # + priority - Task priority level
 # + createdBy - User ID who created the task
 # + assignedTo - User ID task is assigned to (optional)
 # + createdAt - Task creation timestamp
 # + updatedAt - Last update timestamp
+# + timezone - Timezone for date interpretation
 public type Task record {|
     readonly string id;
     string title;
@@ -101,6 +108,7 @@ public type Task record {|
     string? assignedTo = ();
     string createdAt;
     string updatedAt;
+    string timezone = "UTC"; // Added timezone field
 |};
 
 # Task response type
@@ -115,6 +123,8 @@ public type Task record {|
 # + assignedTo - User task is assigned to (optional)
 # + createdAt - Task creation timestamp
 # + updatedAt - Last update timestamp
+# + timezone - Timezone for date interpretation
+# + isOverdue - Whether task is overdue based on current date
 public type TaskResponse record {|
     string id;
     string title;
@@ -126,21 +136,25 @@ public type TaskResponse record {|
     UserResponse? assignedTo = ();
     string createdAt;
     string updatedAt;
+    string timezone;
+    boolean isOverdue;
 |};
 
 # Create task request
 #
 # + title - Task title
 # + description - Task description
-# + dueDate - Due date in ISO format
+# + dueDate - Due date in ISO format (YYYY-MM-DD)
 # + priority - Task priority level
 # + assignedTo - User ID task is assigned to (optional)
+# + timezone - Timezone for date interpretation (optional)
 public type CreateTaskRequest record {|
     string title;
     string description;
     string dueDate;
     TaskPriority priority;
     string? assignedTo = ();
+    string? timezone = (); // Added timezone field
 |};
 
 # Update task request
@@ -151,6 +165,7 @@ public type CreateTaskRequest record {|
 # + dueDate - Due date in ISO format (optional)
 # + priority - Task priority level (optional)
 # + assignedTo - User ID task is assigned to (optional)
+# + timezone - Timezone for date interpretation (optional)
 public type UpdateTaskRequest record {|
     string? title = ();
     string? description = ();
@@ -158,6 +173,7 @@ public type UpdateTaskRequest record {|
     string? dueDate = ();
     TaskPriority? priority = ();
     string? assignedTo = ();
+    string? timezone = (); // Added timezone field
 |};
 
 # Task filter options
@@ -196,4 +212,17 @@ public type TaskStatistics record {|
         int HIGH;
     |} byPriority;
     int overdue;
+|};
+
+# Date validation error response
+#
+# + isError - Whether this is an error
+# + message - Error message
+# + fieldName - Field with the error
+# + validation - Specific validation error details
+public type DateValidationError record {|
+    boolean isError = true;
+    string message;
+    string fieldName;
+    string validation;
 |};

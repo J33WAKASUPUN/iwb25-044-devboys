@@ -4,6 +4,15 @@ import ballerina/time;
 import ballerina/uuid;
 import ballerinax/mongodb;
 
+// List of valid timezones
+final string[] validTimezones = [
+    "UTC", "GMT", "EST", "CST", "MST", "PST",
+    "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles",
+    "Europe/London", "Europe/Paris", "Europe/Berlin", "Europe/Moscow",
+    "Asia/Tokyo", "Asia/Shanghai", "Asia/Kolkata", "Asia/Dubai",
+    "Australia/Sydney", "Pacific/Auckland"
+];
+
 # User service for managing user operations
 public class UserService {
     private final mongodb:Collection userCollection;
@@ -51,6 +60,17 @@ public class UserService {
                 role = requestedRole;
             }
         }
+        
+        // Validate timezone if provided
+        string timezone = "UTC";
+        if (request.timezone is string) {
+            string requestedTimezone = <string>request.timezone;
+            if (validTimezones.indexOf(requestedTimezone) != -1) {
+                timezone = requestedTimezone;
+            } else {
+                log:printWarn("Invalid timezone provided: " + requestedTimezone + ". Defaulting to UTC");
+            }
+        }
 
         // Create user
         string id = uuid:createType1AsString();
@@ -62,6 +82,7 @@ public class UserService {
             passwordHash: hashedPassword,
             name: request.name,
             role: role,  // Use the determined role
+            timezone: timezone, // Use validated timezone
             createdAt: time:utcToString(time:utcNow())
         };
 
@@ -77,7 +98,8 @@ public class UserService {
             id: newUser.id,
             email: newUser.email,
             name: newUser.name,
-            role: newUser.role
+            role: newUser.role,
+            timezone: newUser.timezone
         };
 
         return {
@@ -128,13 +150,47 @@ public class UserService {
             id: user.id,
             email: user.email,
             name: user.name,
-            role: user.role
+            role: user.role,
+            timezone: user.timezone
         };
 
         return {
             token: token,
             user: userResponse
         };
+    }
+    
+    # Update user timezone
+    # 
+    # + userId - ID of the user to update
+    # + timezone - New timezone
+    # + return - Updated user or error
+    public function updateUserTimezone(string userId, string timezone) returns UserResponse|error {
+        log:printInfo("Updating timezone for user: " + userId);
+        
+        // Validate timezone
+        if (validTimezones.indexOf(timezone) == -1) {
+            return error("Invalid timezone. Please use a standard timezone identifier");
+        }
+        
+        // Find user to update
+        User? user = check self.findUserById(userId);
+
+        if user is () {
+            return error("User not found");
+        }
+
+        // Use the findOneAndUpdate approach
+        map<json> filter = {"id": userId};
+        mongodb:Update update = {
+            set: {"timezone": timezone}
+        };
+
+        _ = check self.userCollection->updateOne(filter, update);
+        log:printInfo("Timezone updated for user: " + userId);
+
+        // Return updated user profile
+        return self.getUserProfile(userId);
     }
     
     # Get user by ID
@@ -152,7 +208,8 @@ public class UserService {
             id: user.id,
             email: user.email,
             name: user.name,
-            role: user.role
+            role: user.role,
+            timezone: user.timezone
         };
     }
     
@@ -195,7 +252,8 @@ public class UserService {
                     id: user.id,
                     email: user.email,
                     name: user.name,
-                    role: user.role
+                    role: user.role,
+                    timezone: user.timezone
                 });
             };
         
