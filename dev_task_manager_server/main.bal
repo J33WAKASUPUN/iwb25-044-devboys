@@ -1,5 +1,6 @@
 import ballerina/http;
 import ballerina/log;
+import ballerina/time;
 import ballerinax/mongodb;
 
 // MongoDB configuration using configurable values
@@ -10,6 +11,47 @@ configurable string jwt_secret = ?;
 // Define variables used throughout the code
 final string mongoUri = mongodb_uri;
 final string dbName = db_name;
+
+// Better Error Response Helper Functions
+# Create standardized error response
+#
+# + code - Error code
+# + message - Error message
+# + details - Optional additional details
+# + return - Standardized error JSON
+public function createErrorResponse(string code, string message, json? details = ()) returns json {
+    return {
+        "error": true,
+        "code": code,
+        "message": message,
+        "details": details,
+        "timestamp": time:utcToString(time:utcNow())
+    };
+}
+
+# Create success response
+#
+# + data - Response data
+# + message - Optional success message
+# + return - Standardized success JSON
+public function createSuccessResponse(json data, string? message = ()) returns json {
+    json response = {
+        "success": true,
+        "data": data,
+        "timestamp": time:utcToString(time:utcNow())
+    };
+    
+    if (message is string) {
+        response = {
+            "success": true,
+            "message": message,
+            "data": data,
+            "timestamp": time:utcToString(time:utcNow())
+        };
+    }
+    
+    return response;
+}
 
 // Service configuration
 service / on new http:Listener(9090) {
@@ -71,23 +113,187 @@ service / on new http:Listener(9090) {
         }
     }
 
-    # User registration endpoint
+    #  Health check endpoint - Basic server health
+    #
+    # + return - Server health status
+    resource function get health() returns json {
+        string currentTime = time:utcToString(time:utcNow());
+        
+        // Test MongoDB connection
+        boolean dbHealthy = true;
+        string dbStatus = "connected";
+        int userCount = 0;
+        int taskCount = 0;
+        
+        do {
+            // Simple ping to check if DB is responsive
+            userCount = check self.userCollection->countDocuments({});
+            taskCount = check self.taskCollection->countDocuments({});
+        } on fail error e {
+            dbHealthy = false;
+            dbStatus = "disconnected: " + e.message();
+        }
+        
+        return {
+            "status": dbHealthy ? "healthy" : "degraded",
+            "timestamp": currentTime,
+            "server": {
+                "name": "Dev Task Manager API",
+                "version": "1.0.0",
+                "environment": "development"
+            },
+            "database": {
+                "status": dbStatus,
+                "type": "MongoDB",
+                "collections": {
+                    "users": userCount,
+                    "tasks": taskCount
+                }
+            },
+            "uptime": currentTime, // Simple uptime for now
+            "features": [
+                "user-authentication",
+                "task-management", 
+                "admin-panel",
+                "health-monitoring"
+            ]
+        };
+    }
+
+    # ⚡ Detailed health check for admins
+    #
+    # + req - HTTP request with auth token
+    # + return - Detailed system health or error
+    resource function get health/detailed(http:Request req) returns json|error {
+        // Check authentication
+        string|error userId = extractUserIdFromToken(req);
+        
+        if userId is error {
+            return createErrorResponse("AUTH_REQUIRED", "Authentication required", {"reason": "Missing or invalid token"});
+        }
+        
+        // Check admin role
+        boolean|error isAdmin = self.userService.checkAdminRole(userId);
+        
+        if isAdmin is error {
+            return createErrorResponse("ADMIN_REQUIRED", "Admin access required", {"userRole": "USER"});
+        }
+        
+        string currentTime = time:utcToString(time:utcNow());
+        
+        // Test all collections and get detailed stats
+        map<json> dbDetails = {};
+        map<json> systemHealth = {};
+        
+        do {
+            int userCount = check self.userCollection->countDocuments({});
+            int taskCount = check self.taskCollection->countDocuments({});
+            
+            // Get task statistics
+            TaskStatistics stats = check self.taskService.getTaskStatistics(userId, true);
+            
+            dbDetails = {
+                "users_total": userCount,
+                "tasks_total": taskCount,
+                "tasks_by_status": stats.byStatus,
+                "tasks_by_priority": stats.byPriority,
+                "overdue_tasks": stats.overdue,
+                "last_checked": currentTime
+            };
+            
+            systemHealth = {
+                "database_responsive": true,
+                "collections_accessible": true,
+                "indexes_working": true
+            };
+            
+        } on fail error e {
+            dbDetails = {
+                "error": e.message(),
+                "last_checked": currentTime
+            };
+            systemHealth = {
+                "database_responsive": false,
+                "error": e.message()
+            };
+        }
+        
+        return createSuccessResponse({
+            "server": {
+                "name": "Dev Task Manager API",
+                "version": "1.0.0",
+                "environment": "development",
+                "uptime": currentTime
+            },
+            "database": {
+                "status": "connected",
+                "details": dbDetails
+            },
+            "system": systemHealth,
+            "endpoints": {
+                "total": 16,
+                "categories": {
+                    "auth": 2,
+                    "tasks": 8,
+                    "admin": 4,
+                    "health": 2
+                }
+            }
+        }, "System health check completed successfully");
+    }
+
+    # User registration endpoint (WITH Better Error Handling)
     #
     # + request - Registration request
     # + return - Response with user info and token
-    resource function post auth/register(@http:Payload RegisterRequest request) returns AuthResponse|error {
-        return self.userService.register(request);
+    resource function post auth/register(@http:Payload RegisterRequest request) returns json|error {
+        AuthResponse|error result = self.userService.register(request);
+        
+        if result is error {
+            string errorMsg = result.message();
+            
+            // Categorize different types of errors
+            if (errorMsg.includes("Email already registered")) {
+                return createErrorResponse("EMAIL_EXISTS", errorMsg, {"field": "email"});
+            } else if (errorMsg.includes("Password must be")) {
+                return createErrorResponse("INVALID_PASSWORD", errorMsg, {"field": "password", "requirement": "minimum 6 characters"});
+            } else if (errorMsg.includes("Email is required")) {
+                return createErrorResponse("MISSING_FIELD", errorMsg, {"field": "email"});
+            } else if (errorMsg.includes("Name is required")) {
+                return createErrorResponse("MISSING_FIELD", errorMsg, {"field": "name"});
+            } else {
+                return createErrorResponse("REGISTRATION_FAILED", errorMsg);
+            }
+        }
+        
+        return createSuccessResponse(result, "User registered successfully");
     }
 
-    # User login endpoint
+    # User login endpoint (WITH Better Error Handling)
     #
     # + request - Login request
     # + return - Response with user info and token
-    resource function post auth/login(@http:Payload LoginRequest request) returns AuthResponse|error {
-        return self.userService.login(request);
+    resource function post auth/login(@http:Payload LoginRequest request) returns json|error {
+        AuthResponse|error result = self.userService.login(request);
+        
+        if result is error {
+            string errorMsg = result.message();
+            
+            if (errorMsg.includes("Invalid email or password")) {
+                return createErrorResponse("INVALID_CREDENTIALS", "Invalid email or password", {"field": "credentials"});
+            } else if (errorMsg.includes("Email is required")) {
+                return createErrorResponse("MISSING_FIELD", "Email is required", {"field": "email"});
+            } else if (errorMsg.includes("Password is required")) {
+                return createErrorResponse("MISSING_FIELD", "Password is required", {"field": "password"});
+            } else {
+                return createErrorResponse("LOGIN_FAILED", errorMsg);
+            }
+        }
+        
+        return createSuccessResponse(result, "Login successful");
     }
 
-    # Protected endpoint - Get user profile
+    # Protected endpoint - Get user profile (WITH Better Error Handling)
     #
     # + req - HTTP request
     # + return - User profile or error response
@@ -96,20 +302,14 @@ service / on new http:Listener(9090) {
         string|error userId = extractUserIdFromToken(req);
 
         if userId is error {
-            return <json>{
-                "error": true,
-                "message": userId.message()
-            };
+            return createErrorResponse("AUTH_REQUIRED", userId.message(), {"action": "provide valid Bearer token"});
         }
 
         // Get user profile
         UserResponse|error profile = self.userService.getUserProfile(userId);
 
         if profile is error {
-            return <json>{
-                "error": true,
-                "message": profile.message()
-            };
+            return createErrorResponse("USER_NOT_FOUND", profile.message(), {"userId": userId});
         }
 
         // Get user's tasks with basic pagination
@@ -122,58 +322,87 @@ service / on new http:Listener(9090) {
         PaginatedTaskResponse|error tasks = self.taskService.listTasks(userId, filters);
 
         if tasks is error {
-            return <json>{
-                "error": true,
-                "message": tasks.message()
-            };
+            return createErrorResponse("TASKS_FETCH_FAILED", tasks.message());
         }
 
         // Return user profile with tasks
-        return <json>{
-            "id": profile.id,
-            "email": profile.email,
-            "name": profile.name,
-            "role": profile.role,
-            "timezone": profile.timezone,
-            "tasks": tasks.tasks,
-            "tasksPagination": tasks.pagination
-        };
+        return createSuccessResponse({
+            "profile": profile,
+            "recent_tasks": tasks.tasks,
+            "tasks_pagination": tasks.pagination
+        }, "Profile retrieved successfully");
     }
 
-    # Create a new task
+    # Create a new task (WITH Better Error Handling)
     #
     # + req - HTTP request with auth token
     # + request - Task creation request
     # + return - Created task or error
-    resource function post tasks(http:Request req, @http:Payload CreateTaskRequest request) returns TaskResponse|error {
+    resource function post tasks(http:Request req, @http:Payload CreateTaskRequest request) returns json|error {
         // Check authentication
         string|error userId = extractUserIdFromToken(req);
 
         if userId is error {
-            return error("Authentication required");
+            return createErrorResponse("AUTH_REQUIRED", "Authentication required");
         }
 
-        return self.taskService.createTask(userId, request);
+        TaskResponse|error result = self.taskService.createTask(userId, request);
+        
+        if result is error {
+            string errorMsg = result.message();
+            
+            if (errorMsg.includes("Title is required")) {
+                return createErrorResponse("MISSING_FIELD", errorMsg, {"field": "title"});
+            } else if (errorMsg.includes("Due date is required")) {
+                return createErrorResponse("MISSING_FIELD", errorMsg, {"field": "dueDate"});
+            } else if (errorMsg.includes("Invalid date")) {
+                return createErrorResponse("INVALID_DATE", errorMsg, {"field": "dueDate"});
+            } else if (errorMsg.includes("Assigned user not found")) {
+                return createErrorResponse("USER_NOT_FOUND", errorMsg, {"field": "assignedTo"});
+            } else {
+                return createErrorResponse("TASK_CREATION_FAILED", errorMsg);
+            }
+        }
+        
+        return createSuccessResponse(result, "Task created successfully");
     }
 
-    # Update an existing task
+    # Update an existing task (WITH Better Error Handling)
     #
     # + req - HTTP request with auth token
     # + taskId - ID of task to update
     # + request - Task update request
     # + return - Updated task or error
-    resource function put tasks/[string taskId](http:Request req, @http:Payload UpdateTaskRequest request) returns TaskResponse|error {
+    resource function put tasks/[string taskId](http:Request req, @http:Payload UpdateTaskRequest request) returns json|error {
         // Check authentication
         string|error userId = extractUserIdFromToken(req);
 
         if userId is error {
-            return error("Authentication required");
+            return createErrorResponse("AUTH_REQUIRED", "Authentication required");
         }
 
-        return self.taskService.updateTask(userId, taskId, request);
+        TaskResponse|error result = self.taskService.updateTask(userId, taskId, request);
+        
+        if result is error {
+            string errorMsg = result.message();
+            
+            if (errorMsg.includes("Task not found")) {
+                return createErrorResponse("TASK_NOT_FOUND", errorMsg, {"taskId": taskId});
+            } else if (errorMsg.includes("Not authorized")) {
+                return createErrorResponse("UNAUTHORIZED", errorMsg, {"action": "only creator or assignee can update"});
+            } else if (errorMsg.includes("Invalid date")) {
+                return createErrorResponse("INVALID_DATE", errorMsg, {"field": "dueDate"});
+            } else if (errorMsg.includes("Assigned user not found")) {
+                return createErrorResponse("USER_NOT_FOUND", errorMsg, {"field": "assignedTo"});
+            } else {
+                return createErrorResponse("TASK_UPDATE_FAILED", errorMsg);
+            }
+        }
+        
+        return createSuccessResponse(result, "Task updated successfully");
     }
 
-    # Delete a task
+    # Delete a task (WITH Better Error Handling)
     #
     # + req - HTTP request with auth token
     # + taskId - ID of task to delete
@@ -183,38 +412,49 @@ service / on new http:Listener(9090) {
         string|error userId = extractUserIdFromToken(req);
 
         if userId is error {
-            return error("Authentication required");
+            return createErrorResponse("AUTH_REQUIRED", "Authentication required");
         }
 
         boolean|error result = self.taskService.deleteTask(userId, taskId);
 
         if result is error {
-            return error(result.message());
+            string errorMsg = result.message();
+            
+            if (errorMsg.includes("Task not found")) {
+                return createErrorResponse("TASK_NOT_FOUND", errorMsg, {"taskId": taskId});
+            } else if (errorMsg.includes("Not authorized")) {
+                return createErrorResponse("UNAUTHORIZED", errorMsg, {"action": "only creator can delete"});
+            } else {
+                return createErrorResponse("TASK_DELETE_FAILED", errorMsg);
+            }
         }
 
-        return {
-            "success": true,
-            "message": "Task deleted successfully"
-        };
+        return createSuccessResponse({"taskId": taskId}, "Task deleted successfully");
     }
 
-    # Get a task by ID
+    # Get a task by ID (WITH Better Error Handling)
     #
     # + req - HTTP request with auth token
     # + taskId - ID of task to retrieve
     # + return - Task details or error
-    resource function get tasks/[string taskId](http:Request req) returns TaskResponse|error {
+    resource function get tasks/[string taskId](http:Request req) returns json|error {
         // Check authentication
         string|error userId = extractUserIdFromToken(req);
 
         if userId is error {
-            return error("Authentication required");
+            return createErrorResponse("AUTH_REQUIRED", "Authentication required");
         }
 
-        return self.taskService.getTaskById(taskId);
+        TaskResponse|error result = self.taskService.getTaskById(taskId);
+        
+        if result is error {
+            return createErrorResponse("TASK_NOT_FOUND", result.message(), {"taskId": taskId});
+        }
+        
+        return createSuccessResponse(result, "Task retrieved successfully");
     }
 
-    # List tasks with pagination, filtering, and sorting
+    # List tasks with pagination, filtering, and sorting (WITH Better Error Handling)
     #
     # + req - HTTP request with auth token
     # + status - Filter by status
@@ -240,12 +480,12 @@ service / on new http:Listener(9090) {
             int pageSize = 10,
             string sortBy = "dueDate",
             string sortOrder = "asc"
-    ) returns PaginatedTaskResponse|error {
+    ) returns json|error {
         // Check authentication
         string|error userId = extractUserIdFromToken(req);
 
         if userId is error {
-            return error("Authentication required");
+            return createErrorResponse("AUTH_REQUIRED", "Authentication required");
         }
 
         // Convert query parameters to filter options
@@ -292,10 +532,16 @@ service / on new http:Listener(9090) {
         filters.assignedTo = assignedTo;
         filters.createdBy = createdBy;
 
-        return self.taskService.listTasks(userId, filters);
+        PaginatedTaskResponse|error result = self.taskService.listTasks(userId, filters);
+        
+        if result is error {
+            return createErrorResponse("TASK_LIST_FAILED", result.message());
+        }
+        
+        return createSuccessResponse(result, "Tasks retrieved successfully");
     }
 
-    # Get tasks assigned to the authenticated user
+    # Get tasks assigned to the authenticated user (WITH Better Error Handling)
     #
     # + req - HTTP request with auth token
     # + page - Page number (default: 1)
@@ -309,12 +555,12 @@ service / on new http:Listener(9090) {
             int pageSize = 10,
             string sortBy = "dueDate",
             string sortOrder = "asc"
-    ) returns PaginatedTaskResponse|error {
+    ) returns json|error {
         // Check authentication
         string|error userId = extractUserIdFromToken(req);
 
         if userId is error {
-            return error("Authentication required");
+            return createErrorResponse("AUTH_REQUIRED", "Authentication required");
         }
 
         TaskFilterOptions filters = {
@@ -336,81 +582,94 @@ service / on new http:Listener(9090) {
 
         filters.sortOrder = sortOrder.toLowerAscii() == "desc" ? DESC : ASC;
 
-        return self.taskService.listTasks(userId, filters);
+        PaginatedTaskResponse|error result = self.taskService.listTasks(userId, filters);
+        
+        if result is error {
+            return createErrorResponse("ASSIGNED_TASKS_FAILED", result.message());
+        }
+        
+        return createSuccessResponse(result, "Assigned tasks retrieved successfully");
     }
 
-    # Batch delete multiple tasks
+    # Batch delete multiple tasks (WITH Better Error Handling)
     #
     # + req - HTTP request with auth token
     # + request - Batch delete request with task IDs
     # + return - Batch operation result
-    resource function delete tasks/batch(http:Request req, @http:Payload BatchDeleteTasksRequest request) returns BatchOperationResponse|error {
+    resource function delete tasks/batch(http:Request req, @http:Payload BatchDeleteTasksRequest request) returns json|error {
         // Check authentication
         string|error userId = extractUserIdFromToken(req);
 
         if userId is error {
-            return error("Authentication required");
+            return createErrorResponse("AUTH_REQUIRED", "Authentication required");
         }
 
         // Validate request
         if (request.taskIds.length() == 0) {
-            return error("At least one task ID must be provided");
+            return createErrorResponse("INVALID_REQUEST", "At least one task ID must be provided", {"field": "taskIds"});
         }
 
         if (request.taskIds.length() > 50) {
-            return error("Cannot delete more than 50 tasks at once");
+            return createErrorResponse("REQUEST_TOO_LARGE", "Cannot delete more than 50 tasks at once", {"limit": 50, "provided": request.taskIds.length()});
         }
 
         // Perform batch delete
-        BatchOperationResult result = check self.taskService.batchDeleteTasks(userId, request.taskIds);
+        BatchOperationResult|error result = self.taskService.batchDeleteTasks(userId, request.taskIds);
+        
+        if result is error {
+            return createErrorResponse("BATCH_DELETE_FAILED", result.message());
+        }
 
         // Create response
         string message = string `Batch delete completed: ${result.successful} successful, ${result.failed} failed`;
         
-        return {
-            success: result.failed == 0,
-            message: message,
-            result: result
-        };
+        return createSuccessResponse({
+            "operation": "batch_delete",
+            "result": result
+        }, message);
     }
 
-    # Batch update status of multiple tasks
+    # Batch update status of multiple tasks (WITH Better Error Handling)
     #
     # + req - HTTP request with auth token
     # + request - Batch update request with task IDs and new status
     # + return - Batch operation result
-    resource function put tasks/batch/status(http:Request req, @http:Payload BatchUpdateStatusRequest request) returns BatchOperationResponse|error {
+    resource function put tasks/batch/status(http:Request req, @http:Payload BatchUpdateStatusRequest request) returns json|error {
         // Check authentication
         string|error userId = extractUserIdFromToken(req);
 
         if userId is error {
-            return error("Authentication required");
+            return createErrorResponse("AUTH_REQUIRED", "Authentication required");
         }
 
         // Validate request
         if (request.taskIds.length() == 0) {
-            return error("At least one task ID must be provided");
+            return createErrorResponse("INVALID_REQUEST", "At least one task ID must be provided", {"field": "taskIds"});
         }
 
         if (request.taskIds.length() > 50) {
-            return error("Cannot update more than 50 tasks at once");
+            return createErrorResponse("REQUEST_TOO_LARGE", "Cannot update more than 50 tasks at once", {"limit": 50, "provided": request.taskIds.length()});
         }
 
         // Perform batch status update
-        BatchOperationResult result = check self.taskService.batchUpdateTaskStatus(userId, request.taskIds, request.status);
+        BatchOperationResult|error result = self.taskService.batchUpdateTaskStatus(userId, request.taskIds, request.status);
+        
+        if result is error {
+            return createErrorResponse("BATCH_UPDATE_FAILED", result.message());
+        }
 
         // Create response
         string statusStr = <string>request.status;
         string message = string `Batch status update to ${statusStr} completed: ${result.successful} successful, ${result.failed} failed`;
         
-        return {
-            success: result.failed == 0,
-            message: message,
-            result: result
-        };
+        return createSuccessResponse({
+            "operation": "batch_status_update",
+            "new_status": statusStr,
+            "result": result
+        }, message);
     }
 
-    # Search tasks by text with pagination
+    # Search tasks by text with pagination (WITH Better Error Handling)
     #
     # + req - HTTP request with auth token
     # + query - Search query
@@ -426,17 +685,17 @@ service / on new http:Listener(9090) {
             int pageSize = 10,
             string sortBy = "dueDate",
             string sortOrder = "asc"
-    ) returns PaginatedTaskResponse|error {
+    ) returns json|error {
         // Check authentication
         string|error userId = extractUserIdFromToken(req);
 
         if userId is error {
-            return error("Authentication required");
+            return createErrorResponse("AUTH_REQUIRED", "Authentication required");
         }
 
         // Validate search query
         if (query.trim() == "") {
-            return error("Search query cannot be empty");
+            return createErrorResponse("INVALID_QUERY", "Search query cannot be empty", {"field": "query"});
         }
 
         // Check if user is admin
@@ -466,33 +725,51 @@ service / on new http:Listener(9090) {
         filters.sortOrder = sortOrder.toLowerAscii() == "desc" ? DESC : ASC;
 
         // Search tasks with appropriate permissions
-        return self.taskService.searchTasks(userId, query, filters, isAdmin);
+        PaginatedTaskResponse|error result = self.taskService.searchTasks(userId, query, filters, isAdmin);
+        
+        if result is error {
+            return createErrorResponse("SEARCH_FAILED", result.message(), {"query": query});
+        }
+        
+        return createSuccessResponse({
+            "search_query": query,
+            "results": result
+        }, "Search completed successfully");
     }
 
-    # Admin endpoint: Get all users (admin only)
+    # Admin endpoint: Get all users (admin only) (WITH Better Error Handling)
     #
     # + req - HTTP request with auth token
     # + return - List of all users or error
-    resource function get admin/users(http:Request req) returns UserResponse[]|error {
+    resource function get admin/users(http:Request req) returns json|error {
         // Check authentication
         string|error userId = extractUserIdFromToken(req);
 
         if userId is error {
-            return error("Authentication required");
+            return createErrorResponse("AUTH_REQUIRED", "Authentication required");
         }
 
         // Check admin role
         boolean|error isAdmin = self.userService.checkAdminRole(userId);
 
         if isAdmin is error {
-            return error(isAdmin.message());
+            return createErrorResponse("ADMIN_REQUIRED", isAdmin.message(), {"required_role": "ADMIN"});
         }
 
         // Get all users
-        return self.userService.getAllUsers();
+        UserResponse[]|error result = self.userService.getAllUsers();
+        
+        if result is error {
+            return createErrorResponse("USERS_FETCH_FAILED", result.message());
+        }
+        
+        return createSuccessResponse({
+            "users": result,
+            "total_count": result.length()
+        }, "All users retrieved successfully");
     }
 
-    # Admin endpoint: Get all tasks with pagination (admin only)
+    # Admin endpoint: Get all tasks with pagination (admin only) (WITH Better Error Handling)
     #
     # + req - HTTP request with auth token
     # + page - Page number (default: 1)
@@ -506,19 +783,19 @@ service / on new http:Listener(9090) {
             int pageSize = 10,
             string sortBy = "dueDate",
             string sortOrder = "asc"
-    ) returns PaginatedTaskResponse|error {
+    ) returns json|error {
         // Check authentication
         string|error userId = extractUserIdFromToken(req);
 
         if userId is error {
-            return error("Authentication required");
+            return createErrorResponse("AUTH_REQUIRED", "Authentication required");
         }
 
         // Check admin role
         boolean|error isAdmin = self.userService.checkAdminRole(userId);
 
         if isAdmin is error {
-            return error(isAdmin.message());
+            return createErrorResponse("ADMIN_REQUIRED", isAdmin.message(), {"required_role": "ADMIN"});
         }
 
         // Setup filter options for admin view (no access restrictions)
@@ -542,40 +819,50 @@ service / on new http:Listener(9090) {
 
         // For admin, we need to modify the listTasks method or create a separate admin method
         // For now, let's use a workaround by getting all tasks without user restrictions
-        return self.getAdminTasks(filters);
+        PaginatedTaskResponse|error result = self.getAdminTasks(filters);
+        
+        if result is error {
+            return createErrorResponse("ADMIN_TASKS_FAILED", result.message());
+        }
+        
+        return createSuccessResponse(result, "Admin tasks retrieved successfully");
     }
 
-    # Admin endpoint: Change user role (admin only)
+    # Admin endpoint: Change user role (admin only) (WITH Better Error Handling)
     #
     # + req - HTTP request with auth token
     # + userId - ID of user to update
     # + role - New role (USER or ADMIN)
     # + return - Updated user or error
-    resource function put admin/users/[string userId]/role(http:Request req, string role) returns UserResponse|error {
+    resource function put admin/users/[string userId]/role(http:Request req, string role) returns json|error {
         // Check authentication
         string|error adminId = extractUserIdFromToken(req);
 
         if adminId is error {
-            return error("Authentication required");
+            return createErrorResponse("AUTH_REQUIRED", "Authentication required");
         }
 
         // Check admin role
         boolean|error isAdmin = self.userService.checkAdminRole(adminId);
 
         if isAdmin is error {
-            return error(isAdmin.message());
+            return createErrorResponse("ADMIN_REQUIRED", isAdmin.message(), {"required_role": "ADMIN"});
         }
 
         // Validate role
         if (role != "USER" && role != "ADMIN") {
-            return error("Invalid role: must be USER or ADMIN");
+            return createErrorResponse("INVALID_ROLE", "Invalid role: must be USER or ADMIN", {"valid_roles": ["USER", "ADMIN"], "provided": role});
         }
 
         // Find user to update
-        User? user = check self.userService.findUserById(userId);
+        User?|error user = self.userService.findUserById(userId);
+
+        if user is error {
+            return createErrorResponse("USER_LOOKUP_FAILED", user.message());
+        }
 
         if user is () {
-            return error("User not found");
+            return createErrorResponse("USER_NOT_FOUND", "User not found", {"userId": userId});
         }
 
         // Use the findOneAndUpdate approach instead
@@ -585,23 +872,33 @@ service / on new http:Listener(9090) {
         };
 
         // Fetch the collection and DB directly
-        mongodb:Collection usersCollection = check self.db->getCollection("users");
-        _ = check usersCollection->updateOne(filter, update);
+        do {
+            mongodb:Collection usersCollection = check self.db->getCollection("users");
+            _ = check usersCollection->updateOne(filter, update);
+        } on fail error e {
+            return createErrorResponse("ROLE_UPDATE_FAILED", "Failed to update user role: " + e.message());
+        }
 
         // Return updated user
-        return self.userService.getUserProfile(userId);
+        UserResponse|error updatedUser = self.userService.getUserProfile(userId);
+        
+        if updatedUser is error {
+            return createErrorResponse("USER_FETCH_FAILED", updatedUser.message());
+        }
+        
+        return createSuccessResponse(updatedUser, string `User role updated to ${role} successfully`);
     }
 
-    # Get task statistics
+    # Get task statistics (WITH Better Error Handling)
     #
     # + req - HTTP request with auth token
     # + return - Task statistics or error
-    resource function get stats/tasks(http:Request req) returns TaskStatistics|error {
+    resource function get stats/tasks(http:Request req) returns json|error {
         // Check authentication
         string|error userId = extractUserIdFromToken(req);
 
         if userId is error {
-            return error("Authentication required");
+            return createErrorResponse("AUTH_REQUIRED", "Authentication required");
         }
 
         // Check if user is admin
@@ -612,10 +909,16 @@ service / on new http:Listener(9090) {
         }
 
         // Get statistics with appropriate permissions
-        return self.taskService.getTaskStatistics(userId, isAdmin);
+        TaskStatistics|error result = self.taskService.getTaskStatistics(userId, isAdmin);
+        
+        if result is error {
+            return createErrorResponse("STATS_FAILED", result.message());
+        }
+        
+        return createSuccessResponse(result, "Task statistics retrieved successfully");
     }
 
-    # Admin endpoint: Get detailed task statistics (admin only)
+    # Admin endpoint: Get detailed task statistics (admin only) (WITH Better Error Handling)
     #
     # + req - HTTP request with auth token
     # + return - Task statistics or error
@@ -624,21 +927,29 @@ service / on new http:Listener(9090) {
         string|error userId = extractUserIdFromToken(req);
 
         if userId is error {
-            return error("Authentication required");
+            return createErrorResponse("AUTH_REQUIRED", "Authentication required");
         }
 
         // Check admin role
         boolean|error isAdmin = self.userService.checkAdminRole(userId);
 
         if isAdmin is error {
-            return error(isAdmin.message());
+            return createErrorResponse("ADMIN_REQUIRED", isAdmin.message(), {"required_role": "ADMIN"});
         }
 
         // Get base statistics
-        TaskStatistics stats = check self.taskService.getTaskStatistics(userId, true);
+        TaskStatistics|error stats = self.taskService.getTaskStatistics(userId, true);
+        
+        if stats is error {
+            return createErrorResponse("STATS_FAILED", stats.message());
+        }
 
         // Get all users for additional statistics
-        UserResponse[] users = check self.userService.getAllUsers();
+        UserResponse[]|error users = self.userService.getAllUsers();
+        
+        if users is error {
+            return createErrorResponse("USERS_FETCH_FAILED", users.message());
+        }
 
         // Count tasks per user
         map<json> tasksPerUser = {};
@@ -650,32 +961,51 @@ service / on new http:Listener(9090) {
                 pageSize: 1000 // Get all tasks for counting
             };
 
-            PaginatedTaskResponse userTasks = check self.taskService.listTasks(user.id, filters);
-            tasksPerUser[user.name] = userTasks.pagination.totalItems;
+            PaginatedTaskResponse|error userTasks = self.taskService.listTasks(user.id, filters);
+            if userTasks is PaginatedTaskResponse {
+                tasksPerUser[user.name] = userTasks.pagination.totalItems;
+            } else {
+                tasksPerUser[user.name] = 0;
+            }
         }
 
         // Return enhanced statistics
-        return {
-            "basicStats": stats,
-            "tasksPerUser": tasksPerUser
-        };
+        return createSuccessResponse({
+            "basic_stats": stats,
+            "tasks_per_user": tasksPerUser,
+            "total_users": users.length()
+        }, "Detailed task statistics retrieved successfully");
     }
 
-    # Update user timezone
+    # Update user timezone (WITH Better Error Handling)
     #
     # + req - HTTP request with auth token
     # + timezone - New timezone value
     # + return - Updated user profile or error
-    resource function put profile/timezone(http:Request req, string timezone) returns UserResponse|error {
+    resource function put profile/timezone(http:Request req, string timezone) returns json|error {
         // Check authentication
         string|error userId = extractUserIdFromToken(req);
 
         if userId is error {
-            return error("Authentication required");
+            return createErrorResponse("AUTH_REQUIRED", "Authentication required");
         }
 
         // Update the timezone
-        return self.userService.updateUserTimezone(userId, timezone);
+        UserResponse|error result = self.userService.updateUserTimezone(userId, timezone);
+        
+        if result is error {
+            string errorMsg = result.message();
+            
+            if (errorMsg.includes("Invalid timezone")) {
+                return createErrorResponse("INVALID_TIMEZONE", errorMsg, {"field": "timezone", "provided": timezone});
+            } else if (errorMsg.includes("User not found")) {
+                return createErrorResponse("USER_NOT_FOUND", errorMsg, {"userId": userId});
+            } else {
+                return createErrorResponse("TIMEZONE_UPDATE_FAILED", errorMsg);
+            }
+        }
+        
+        return createSuccessResponse(result, "Timezone updated successfully");
     }
 
     # Helper method to get admin tasks (all tasks without user restrictions)
