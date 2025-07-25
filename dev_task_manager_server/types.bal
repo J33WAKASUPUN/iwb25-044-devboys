@@ -1,5 +1,3 @@
-// types.bal
-
 // User management types
 # User registration request
 #
@@ -82,6 +80,22 @@ public enum TaskPriority {
     LOW = "LOW",
     MEDIUM = "MEDIUM",
     HIGH = "HIGH"
+}
+
+# Task sorting options enum
+public enum TaskSortBy {
+    DUE_DATE = "dueDate",
+    PRIORITY = "priority",
+    STATUS = "status",
+    CREATED_AT = "createdAt",
+    UPDATED_AT = "updatedAt",
+    TITLE = "title"
+}
+
+# Sort order enum
+public enum SortOrder {
+    ASC = "asc",
+    DESC = "desc"
 }
 
 # Task record
@@ -176,7 +190,24 @@ public type UpdateTaskRequest record {|
     string? timezone = (); // Added timezone field
 |};
 
-# Task filter options
+# Pagination information
+#
+# + page - Current page number (1-based)
+# + pageSize - Number of items per page
+# + totalItems - Total number of items available
+# + totalPages - Total number of pages
+# + hasNext - Whether there are more pages after current
+# + hasPrevious - Whether there are pages before current
+public type PaginationInfo record {|
+    int page;
+    int pageSize;
+    int totalItems;
+    int totalPages;
+    boolean hasNext;
+    boolean hasPrevious;
+|};
+
+# Task filter options with pagination and sorting
 #
 # + status - Filter by status
 # + priority - Filter by priority
@@ -184,6 +215,10 @@ public type UpdateTaskRequest record {|
 # + endDate - Filter by due date range (end)
 # + assignedTo - Filter by assignee
 # + createdBy - Filter by creator
+# + page - Page number for pagination (1-based, default: 1)
+# + pageSize - Number of items per page (default: 10, max: 100)
+# + sortBy - Field to sort by (default: dueDate)
+# + sortOrder - Sort order (default: asc)
 public type TaskFilterOptions record {|
     TaskStatus? status = ();
     TaskPriority? priority = ();
@@ -191,6 +226,19 @@ public type TaskFilterOptions record {|
     string? endDate = ();
     string? assignedTo = ();
     string? createdBy = ();
+    int page = 1;
+    int pageSize = 10;
+    TaskSortBy sortBy = DUE_DATE;
+    SortOrder sortOrder = ASC;
+|};
+
+# Paginated task list response
+#
+# + tasks - Array of task responses
+# + pagination - Pagination information
+public type PaginatedTaskResponse record {|
+    TaskResponse[] tasks;
+    PaginationInfo pagination;
 |};
 
 # Task statistics response
@@ -225,4 +273,48 @@ public type DateValidationError record {|
     string message;
     string fieldName;
     string validation;
+|};
+
+# Batch operations types
+
+# Batch delete tasks request
+#
+# + taskIds - Array of task IDs to delete
+public type BatchDeleteTasksRequest record {|
+    string[] taskIds;
+|};
+
+# Batch update task status request
+#
+# + taskIds - Array of task IDs to update
+# + status - New status to apply to all tasks
+public type BatchUpdateStatusRequest record {|
+    string[] taskIds;
+    TaskStatus status;
+|};
+
+# Batch operation result
+#
+# + successful - Number of successfully processed items
+# + failed - Number of failed items
+# + errors - Map of task IDs to error messages for failed operations
+# + successfulIds - Array of successfully processed task IDs
+# + failedIds - Array of failed task IDs
+public type BatchOperationResult record {|
+    int successful;
+    int failed;
+    map<string> errors;
+    string[] successfulIds;
+    string[] failedIds;
+|};
+
+# Batch operation response
+#
+# + success - Whether the overall operation was successful
+# + message - Operation summary message
+# + result - Detailed operation results
+public type BatchOperationResponse record {|
+    boolean success;
+    string message;
+    BatchOperationResult result;
 |};

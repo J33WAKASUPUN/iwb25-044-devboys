@@ -1,4 +1,3 @@
-// main.bal
 import ballerina/http;
 import ballerina/log;
 import ballerinax/mongodb;
@@ -113,12 +112,14 @@ service / on new http:Listener(9090) {
             };
         }
 
-        // Get user's tasks
+        // Get user's tasks with basic pagination
         TaskFilterOptions filters = {
-            createdBy: userId
+            createdBy: userId,
+            page: 1,
+            pageSize: 5
         };
 
-        TaskResponse[]|error tasks = self.taskService.listTasks(userId, filters);
+        PaginatedTaskResponse|error tasks = self.taskService.listTasks(userId, filters);
 
         if tasks is error {
             return <json>{
@@ -133,7 +134,9 @@ service / on new http:Listener(9090) {
             "email": profile.email,
             "name": profile.name,
             "role": profile.role,
-            "tasks": tasks
+            "timezone": profile.timezone,
+            "tasks": tasks.tasks,
+            "tasksPagination": tasks.pagination
         };
     }
 
@@ -211,7 +214,7 @@ service / on new http:Listener(9090) {
         return self.taskService.getTaskById(taskId);
     }
 
-    # List tasks with optional filtering
+    # List tasks with pagination, filtering, and sorting
     #
     # + req - HTTP request with auth token
     # + status - Filter by status
@@ -220,7 +223,11 @@ service / on new http:Listener(9090) {
     # + endDate - Filter by due date range (end)
     # + assignedTo - Filter by assignee
     # + createdBy - Filter by creator
-    # + return - List of tasks or error
+    # + page - Page number (default: 1)
+    # + pageSize - Number of items per page (default: 10, max: 100)
+    # + sortBy - Field to sort by (default: dueDate)
+    # + sortOrder - Sort order (default: asc)
+    # + return - Paginated list of tasks
     resource function get tasks(
             http:Request req,
             string? status = (),
@@ -228,8 +235,12 @@ service / on new http:Listener(9090) {
             string? startDate = (),
             string? endDate = (),
             string? assignedTo = (),
-            string? createdBy = ()
-) returns TaskResponse[]|error {
+            string? createdBy = (),
+            int page = 1,
+            int pageSize = 10,
+            string sortBy = "dueDate",
+            string sortOrder = "asc"
+    ) returns PaginatedTaskResponse|error {
         // Check authentication
         string|error userId = extractUserIdFromToken(req);
 
@@ -238,36 +249,44 @@ service / on new http:Listener(9090) {
         }
 
         // Convert query parameters to filter options
-        TaskFilterOptions filters = {};
+        TaskFilterOptions filters = {
+            page: page,
+            pageSize: pageSize
+        };
 
+        // Parse and validate sortBy parameter
+        match sortBy.toLowerAscii() {
+            "duedate" => { filters.sortBy = DUE_DATE; }
+            "priority" => { filters.sortBy = PRIORITY; }
+            "status" => { filters.sortBy = STATUS; }
+            "createdat" => { filters.sortBy = CREATED_AT; }
+            "updatedat" => { filters.sortBy = UPDATED_AT; }
+            "title" => { filters.sortBy = TITLE; }
+            _ => { filters.sortBy = DUE_DATE; } // Default
+        }
+
+        // Parse and validate sortOrder parameter
+        filters.sortOrder = sortOrder.toLowerAscii() == "desc" ? DESC : ASC;
+
+        // Parse status filter
         if (status is string) {
-            match status {
-                "TODO" => {
-                    filters.status = TODO;
-                }
-                "IN_PROGRESS" => {
-                    filters.status = IN_PROGRESS;
-                }
-                "DONE" => {
-                    filters.status = DONE;
-                }
+            match status.toUpperAscii() {
+                "TODO" => { filters.status = TODO; }
+                "IN_PROGRESS" => { filters.status = IN_PROGRESS; }
+                "DONE" => { filters.status = DONE; }
             }
         }
 
+        // Parse priority filter
         if (priority is string) {
-            match priority {
-                "LOW" => {
-                    filters.priority = LOW;
-                }
-                "MEDIUM" => {
-                    filters.priority = MEDIUM;
-                }
-                "HIGH" => {
-                    filters.priority = HIGH;
-                }
+            match priority.toUpperAscii() {
+                "LOW" => { filters.priority = LOW; }
+                "MEDIUM" => { filters.priority = MEDIUM; }
+                "HIGH" => { filters.priority = HIGH; }
             }
         }
 
+        // Set other filters
         filters.startDate = startDate;
         filters.endDate = endDate;
         filters.assignedTo = assignedTo;
@@ -279,8 +298,18 @@ service / on new http:Listener(9090) {
     # Get tasks assigned to the authenticated user
     #
     # + req - HTTP request with auth token
-    # + return - List of assigned tasks or error
-    resource function get tasks/assigned(http:Request req) returns TaskResponse[]|error {
+    # + page - Page number (default: 1)
+    # + pageSize - Number of items per page (default: 10)
+    # + sortBy - Field to sort by (default: dueDate)
+    # + sortOrder - Sort order (default: asc)
+    # + return - Paginated list of assigned tasks
+    resource function get tasks/assigned(
+            http:Request req,
+            int page = 1,
+            int pageSize = 10,
+            string sortBy = "dueDate",
+            string sortOrder = "asc"
+    ) returns PaginatedTaskResponse|error {
         // Check authentication
         string|error userId = extractUserIdFromToken(req);
 
@@ -289,10 +318,155 @@ service / on new http:Listener(9090) {
         }
 
         TaskFilterOptions filters = {
-            assignedTo: userId
+            assignedTo: userId,
+            page: page,
+            pageSize: pageSize
         };
 
+        // Parse sort parameters
+        match sortBy.toLowerAscii() {
+            "duedate" => { filters.sortBy = DUE_DATE; }
+            "priority" => { filters.sortBy = PRIORITY; }
+            "status" => { filters.sortBy = STATUS; }
+            "createdat" => { filters.sortBy = CREATED_AT; }
+            "updatedat" => { filters.sortBy = UPDATED_AT; }
+            "title" => { filters.sortBy = TITLE; }
+            _ => { filters.sortBy = DUE_DATE; }
+        }
+
+        filters.sortOrder = sortOrder.toLowerAscii() == "desc" ? DESC : ASC;
+
         return self.taskService.listTasks(userId, filters);
+    }
+
+    # Batch delete multiple tasks
+    #
+    # + req - HTTP request with auth token
+    # + request - Batch delete request with task IDs
+    # + return - Batch operation result
+    resource function delete tasks/batch(http:Request req, @http:Payload BatchDeleteTasksRequest request) returns BatchOperationResponse|error {
+        // Check authentication
+        string|error userId = extractUserIdFromToken(req);
+
+        if userId is error {
+            return error("Authentication required");
+        }
+
+        // Validate request
+        if (request.taskIds.length() == 0) {
+            return error("At least one task ID must be provided");
+        }
+
+        if (request.taskIds.length() > 50) {
+            return error("Cannot delete more than 50 tasks at once");
+        }
+
+        // Perform batch delete
+        BatchOperationResult result = check self.taskService.batchDeleteTasks(userId, request.taskIds);
+
+        // Create response
+        string message = string `Batch delete completed: ${result.successful} successful, ${result.failed} failed`;
+        
+        return {
+            success: result.failed == 0,
+            message: message,
+            result: result
+        };
+    }
+
+    # Batch update status of multiple tasks
+    #
+    # + req - HTTP request with auth token
+    # + request - Batch update request with task IDs and new status
+    # + return - Batch operation result
+    resource function put tasks/batch/status(http:Request req, @http:Payload BatchUpdateStatusRequest request) returns BatchOperationResponse|error {
+        // Check authentication
+        string|error userId = extractUserIdFromToken(req);
+
+        if userId is error {
+            return error("Authentication required");
+        }
+
+        // Validate request
+        if (request.taskIds.length() == 0) {
+            return error("At least one task ID must be provided");
+        }
+
+        if (request.taskIds.length() > 50) {
+            return error("Cannot update more than 50 tasks at once");
+        }
+
+        // Perform batch status update
+        BatchOperationResult result = check self.taskService.batchUpdateTaskStatus(userId, request.taskIds, request.status);
+
+        // Create response
+        string statusStr = <string>request.status;
+        string message = string `Batch status update to ${statusStr} completed: ${result.successful} successful, ${result.failed} failed`;
+        
+        return {
+            success: result.failed == 0,
+            message: message,
+            result: result
+        };
+    }
+
+    # Search tasks by text with pagination
+    #
+    # + req - HTTP request with auth token
+    # + query - Search query
+    # + page - Page number (default: 1)
+    # + pageSize - Number of items per page (default: 10)
+    # + sortBy - Field to sort by (default: dueDate)
+    # + sortOrder - Sort order (default: asc)
+    # + return - Paginated matching tasks
+    resource function get tasks/search(
+            http:Request req,
+            string query,
+            int page = 1,
+            int pageSize = 10,
+            string sortBy = "dueDate",
+            string sortOrder = "asc"
+    ) returns PaginatedTaskResponse|error {
+        // Check authentication
+        string|error userId = extractUserIdFromToken(req);
+
+        if userId is error {
+            return error("Authentication required");
+        }
+
+        // Validate search query
+        if (query.trim() == "") {
+            return error("Search query cannot be empty");
+        }
+
+        // Check if user is admin
+        boolean isAdmin = false;
+        boolean|error adminCheck = self.userService.checkAdminRole(userId);
+        if adminCheck is boolean {
+            isAdmin = true;
+        }
+
+        // Setup filter options for search
+        TaskFilterOptions filters = {
+            page: page,
+            pageSize: pageSize
+        };
+
+        // Parse sort parameters
+        match sortBy.toLowerAscii() {
+            "duedate" => { filters.sortBy = DUE_DATE; }
+            "priority" => { filters.sortBy = PRIORITY; }
+            "status" => { filters.sortBy = STATUS; }
+            "createdat" => { filters.sortBy = CREATED_AT; }
+            "updatedat" => { filters.sortBy = UPDATED_AT; }
+            "title" => { filters.sortBy = TITLE; }
+            _ => { filters.sortBy = DUE_DATE; }
+        }
+
+        filters.sortOrder = sortOrder.toLowerAscii() == "desc" ? DESC : ASC;
+
+        // Search tasks with appropriate permissions
+        return self.taskService.searchTasks(userId, query, filters, isAdmin);
     }
 
     # Admin endpoint: Get all users (admin only)
@@ -318,11 +492,21 @@ service / on new http:Listener(9090) {
         return self.userService.getAllUsers();
     }
 
-    # Admin endpoint: Get all tasks (admin only)
+    # Admin endpoint: Get all tasks with pagination (admin only)
     #
     # + req - HTTP request with auth token
-    # + return - List of all tasks or error
-    resource function get admin/tasks(http:Request req) returns TaskResponse[]|error {
+    # + page - Page number (default: 1)
+    # + pageSize - Number of items per page (default: 10)
+    # + sortBy - Field to sort by (default: dueDate)
+    # + sortOrder - Sort order (default: asc)
+    # + return - Paginated list of all tasks
+    resource function get admin/tasks(
+            http:Request req,
+            int page = 1,
+            int pageSize = 10,
+            string sortBy = "dueDate",
+            string sortOrder = "asc"
+    ) returns PaginatedTaskResponse|error {
         // Check authentication
         string|error userId = extractUserIdFromToken(req);
 
@@ -337,18 +521,28 @@ service / on new http:Listener(9090) {
             return error(isAdmin.message());
         }
 
-        // Directly fetch all tasks from the database without filtering
-        stream<Task, error?> taskStream = check self.taskCollection->find({});
+        // Setup filter options for admin view (no access restrictions)
+        TaskFilterOptions filters = {
+            page: page,
+            pageSize: pageSize
+        };
 
-        TaskResponse[] tasks = [];
-        check from Task task in taskStream
-            do {
-                // Convert each task to a response
-                TaskResponse response = check self.taskService.getTaskById(task.id);
-                tasks.push(response);
-            };
+        // Parse sort parameters
+        match sortBy.toLowerAscii() {
+            "duedate" => { filters.sortBy = DUE_DATE; }
+            "priority" => { filters.sortBy = PRIORITY; }
+            "status" => { filters.sortBy = STATUS; }
+            "createdat" => { filters.sortBy = CREATED_AT; }
+            "updatedat" => { filters.sortBy = UPDATED_AT; }
+            "title" => { filters.sortBy = TITLE; }
+            _ => { filters.sortBy = DUE_DATE; }
+        }
 
-        return tasks;
+        filters.sortOrder = sortOrder.toLowerAscii() == "desc" ? DESC : ASC;
+
+        // For admin, we need to modify the listTasks method or create a separate admin method
+        // For now, let's use a workaround by getting all tasks without user restrictions
+        return self.getAdminTasks(filters);
     }
 
     # Admin endpoint: Change user role (admin only)
@@ -451,11 +645,13 @@ service / on new http:Listener(9090) {
 
         foreach UserResponse user in users {
             TaskFilterOptions filters = {
-                createdBy: user.id
+                createdBy: user.id,
+                page: 1,
+                pageSize: 1000 // Get all tasks for counting
             };
 
-            TaskResponse[] userTasks = check self.taskService.listTasks(userId, filters);
-            tasksPerUser[user.name] = userTasks.length();
+            PaginatedTaskResponse userTasks = check self.taskService.listTasks(user.id, filters);
+            tasksPerUser[user.name] = userTasks.pagination.totalItems;
         }
 
         // Return enhanced statistics
@@ -463,30 +659,6 @@ service / on new http:Listener(9090) {
             "basicStats": stats,
             "tasksPerUser": tasksPerUser
         };
-    }
-
-    # Search tasks by text
-    #
-    # + req - HTTP request with auth token
-    # + query - Search query
-    # + return - Matching tasks or error
-    resource function get tasks/search(http:Request req, string query) returns TaskResponse[]|error {
-        // Check authentication
-        string|error userId = extractUserIdFromToken(req);
-
-        if userId is error {
-            return error("Authentication required");
-        }
-
-        // Check if user is admin
-        boolean isAdmin = false;
-        boolean|error adminCheck = self.userService.checkAdminRole(userId);
-        if adminCheck is boolean {
-            isAdmin = true;
-        }
-
-        // Search tasks with appropriate permissions
-        return self.taskService.searchTasks(userId, query, isAdmin);
     }
 
     # Update user timezone
@@ -504,5 +676,63 @@ service / on new http:Listener(9090) {
 
         // Update the timezone
         return self.userService.updateUserTimezone(userId, timezone);
+    }
+
+    # Helper method to get admin tasks (all tasks without user restrictions)
+    #
+    # + filters - Pagination and sorting options
+    # + return - Paginated task response
+    private function getAdminTasks(TaskFilterOptions filters) returns PaginatedTaskResponse|error {
+        // Build empty filter to get all tasks
+        map<json> filter = {};
+
+        // Validate and setup pagination
+        int page = filters.page < 1 ? 1 : filters.page;
+        int pageSize = filters.pageSize < 1 ? 10 : (filters.pageSize > 100 ? 100 : filters.pageSize);
+        int skip = (page - 1) * pageSize;
+
+        // Get total count for pagination
+        int totalCount = check self.taskCollection->countDocuments(filter);
+        int totalPages = totalCount == 0 ? 1 : ((totalCount - 1) / pageSize) + 1;
+
+        // Setup sorting
+        map<json> sortOptions = {};
+        string sortField = <string>filters.sortBy;
+        int sortDirection = <string>filters.sortOrder == "desc" ? -1 : 1;
+        sortOptions[sortField] = sortDirection;
+
+        // Query tasks with pagination and sorting
+        stream<Task, error?> taskStream = check self.taskCollection->find(filter, {
+            "limit": pageSize,
+            "skip": skip,
+            "sort": sortOptions
+        });
+
+        // Convert tasks to responses
+        TaskResponse[] responses = [];
+        error? err = from Task task in taskStream
+            do {
+                TaskResponse response = check self.taskService.convertTaskToResponse(task);
+                responses.push(response);
+            };
+
+        if (err is error) {
+            return err;
+        }
+
+        // Create pagination info
+        PaginationInfo pagination = {
+            page: page,
+            pageSize: pageSize,
+            totalItems: totalCount,
+            totalPages: totalPages,
+            hasNext: page < totalPages,
+            hasPrevious: page > 1
+        };
+
+        return {
+            tasks: responses,
+            pagination: pagination
+        };
     }
 }

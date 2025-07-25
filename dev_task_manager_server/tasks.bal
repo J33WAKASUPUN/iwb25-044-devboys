@@ -1,4 +1,3 @@
-// tasks.bal
 import ballerina/log;
 import ballerina/time;
 import ballerina/uuid;
@@ -215,13 +214,13 @@ public class TaskService {
         return self.getTaskResponseById(taskId);
     }
 
-    # List tasks with optional filtering
+    # List tasks with pagination, filtering, and sorting
     #
     # + userId - ID of user listing tasks
-    # + filters - Optional filters to apply
-    # + return - Array of task responses
-    public function listTasks(string userId, TaskFilterOptions filters) returns TaskResponse[]|error {
-        log:printInfo("Listing tasks for user: " + userId);
+    # + filters - Filter, pagination, and sorting options
+    # + return - Paginated task response
+    public function listTasks(string userId, TaskFilterOptions filters) returns PaginatedTaskResponse|error {
+        log:printInfo("Listing tasks for user: " + userId + " with pagination");
 
         // Build filter
         map<json> filter = {};
@@ -279,8 +278,37 @@ public class TaskService {
             filter["dueDate"] = {"$lte": <string>filters.endDate};
         }
 
-        // Query tasks
-        stream<Task, error?> taskStream = check self.taskCollection->find(filter);
+        // Validate and setup pagination
+        int page = filters.page < 1 ? 1 : filters.page;
+        int pageSize = filters.pageSize < 1 ? 10 : (filters.pageSize > 100 ? 100 : filters.pageSize);
+        int skip = (page - 1) * pageSize;
+
+        // Get total count for pagination
+        int totalCount = check self.taskCollection->countDocuments(filter);
+        int totalPages = totalCount == 0 ? 1 : ((totalCount - 1) / pageSize) + 1;
+
+        // Setup sorting
+        map<json> sortOptions = {};
+        string sortField = <string>filters.sortBy;
+        int sortDirection = <string>filters.sortOrder == "desc" ? -1 : 1;
+        
+        // Handle priority sorting with custom order
+        if (sortField == "priority") {
+            // For priority, we'll sort by a mapped value where HIGH=3, MEDIUM=2, LOW=1
+            // This requires aggregation pipeline, but for simplicity, we'll use string sort
+            sortOptions[sortField] = sortDirection;
+        } else {
+            sortOptions[sortField] = sortDirection;
+        }
+
+        log:printInfo(string `Querying tasks: page=${page}, pageSize=${pageSize}, sortBy=${sortField}, order=${<string>filters.sortOrder}`);
+
+        // Query tasks with pagination and sorting
+        stream<Task, error?> taskStream = check self.taskCollection->find(filter, {
+            "limit": pageSize,
+            "skip": skip,
+            "sort": sortOptions
+        });
 
         // Convert tasks to responses
         TaskResponse[] responses = [];
@@ -294,7 +322,115 @@ public class TaskService {
             return err;
         }
 
-        return responses;
+        // Create pagination info
+        PaginationInfo pagination = {
+            page: page,
+            pageSize: pageSize,
+            totalItems: totalCount,
+            totalPages: totalPages,
+            hasNext: page < totalPages,
+            hasPrevious: page > 1
+        };
+
+        return {
+            tasks: responses,
+            pagination: pagination
+        };
+    }
+
+    # Batch delete multiple tasks
+    #
+    # + userId - ID of user performing the operation
+    # + taskIds - Array of task IDs to delete
+    # + return - Batch operation result
+    public function batchDeleteTasks(string userId, string[] taskIds) returns BatchOperationResult|error {
+        log:printInfo("Batch deleting tasks for user: " + userId);
+
+        int successful = 0;
+        int failed = 0;
+        map<string> errors = {};
+        string[] successfulIds = [];
+        string[] failedIds = [];
+
+        foreach string taskId in taskIds {
+            do {
+                boolean|error result = self.deleteTask(userId, taskId);
+                if (result is boolean && result) {
+                    successful += 1;
+                    successfulIds.push(taskId);
+                    log:printInfo("Successfully deleted task: " + taskId);
+                } else {
+                    failed += 1;
+                    failedIds.push(taskId);
+                    string errorMsg = result is error ? result.message() : "Failed to delete";
+                    errors[taskId] = errorMsg;
+                    log:printError("Failed to delete task " + taskId + ": " + errorMsg);
+                }
+            } on fail error e {
+                failed += 1;
+                failedIds.push(taskId);
+                errors[taskId] = e.message();
+                log:printError("Error deleting task " + taskId + ": " + e.message());
+            }
+        }
+
+        return {
+            successful: successful,
+            failed: failed,
+            errors: errors,
+            successfulIds: successfulIds,
+            failedIds: failedIds
+        };
+    }
+
+    # Batch update status of multiple tasks
+    #
+    # + userId - ID of user performing the operation
+    # + taskIds - Array of task IDs to update
+    # + status - New status to apply
+    # + return - Batch operation result
+    public function batchUpdateTaskStatus(string userId, string[] taskIds, TaskStatus status) returns BatchOperationResult|error {
+        log:printInfo("Batch updating task status for user: " + userId + " to status: " + <string>status);
+
+        int successful = 0;
+        int failed = 0;
+        map<string> errors = {};
+        string[] successfulIds = [];
+        string[] failedIds = [];
+
+        foreach string taskId in taskIds {
+            do {
+                // Create update request with only status
+                UpdateTaskRequest updateRequest = {
+                    status: status
+                };
+
+                TaskResponse|error result = self.updateTask(userId, taskId, updateRequest);
+                if (result is TaskResponse) {
+                    successful += 1;
+                    successfulIds.push(taskId);
+                    log:printInfo("Successfully updated task status: " + taskId);
+                } else {
+                    failed += 1;
+                    failedIds.push(taskId);
+                    errors[taskId] = result.message();
+                    log:printError("Failed to update task " + taskId + ": " + result.message());
+                }
+            } on fail error e {
+                failed += 1;
+                failedIds.push(taskId);
+                errors[taskId] = e.message();
+                log:printError("Error updating task " + taskId + ": " + e.message());
+            }
+        }
+
+        return {
+            successful: successful,
+            failed: failed,
+            errors: errors,
+            successfulIds: successfulIds,
+            failedIds: failedIds
+        };
     }
 
     # Find task by ID
@@ -443,13 +579,14 @@ public class TaskService {
         };
     }
 
-    # Search tasks by text
+    # Search tasks by text with pagination
     #
     # + userId - ID of user searching tasks
     # + query - Search query
+    # + filters - Pagination and sorting options
     # + isAdmin - Whether the user is an admin
-    # + return - Matching tasks
-    public function searchTasks(string userId, string query, boolean isAdmin = false) returns TaskResponse[]|error {
+    # + return - Paginated search results
+    public function searchTasks(string userId, string query, TaskFilterOptions filters, boolean isAdmin = false) returns PaginatedTaskResponse|error {
         log:printInfo("Searching tasks with query: " + query);
 
         // Build the base filter
@@ -465,24 +602,138 @@ public class TaskService {
             filter["$or"] = accessConditions;
         }
 
-        // Query tasks directly as Task objects
-        stream<Task, error?> taskStream = check self.taskCollection->find(filter);
+        // Validate and setup pagination
+        int page = filters.page < 1 ? 1 : filters.page;
+        int pageSize = filters.pageSize < 1 ? 10 : (filters.pageSize > 100 ? 100 : filters.pageSize);
+        int skip = (page - 1) * pageSize;
+
+        // Setup sorting
+        map<json> sortOptions = {};
+        string sortField = <string>filters.sortBy;
+        int sortDirection = <string>filters.sortOrder == "desc" ? -1 : 1;
+        sortOptions[sortField] = sortDirection;
+
+        // Query all matching tasks first (for search)
+        stream<Task, error?> allTasksStream = check self.taskCollection->find(filter);
 
         // Filter tasks in memory based on search query
-        TaskResponse[] responses = [];
+        TaskResponse[] allResponses = [];
         string lowercaseQuery = query.toLowerAscii();
 
-        check from Task task in taskStream
+        check from Task task in allTasksStream
             do {
                 // Check if title or description contains the search term (case-insensitive)
                 if (task.title.toLowerAscii().includes(lowercaseQuery) ||
                 task.description.toLowerAscii().includes(lowercaseQuery)) {
 
                     TaskResponse response = check self.convertTaskToResponse(task);
-                    responses.push(response);
+                    allResponses.push(response);
                 }
             };
 
-        return responses;
+        // Sort the results based on sort options
+        TaskResponse[] sortedResponses = self.sortTaskResponses(allResponses, <string>filters.sortBy, <string>filters.sortOrder);
+
+        // Apply pagination to sorted results
+        int totalCount = sortedResponses.length();
+        int totalPages = totalCount == 0 ? 1 : ((totalCount - 1) / pageSize) + 1;
+        
+        TaskResponse[] paginatedResponses = [];
+        int endIndex = skip + pageSize;
+        if (skip < totalCount) {
+            endIndex = endIndex > totalCount ? totalCount : endIndex;
+            paginatedResponses = sortedResponses.slice(skip, endIndex);
+        }
+
+        // Create pagination info
+        PaginationInfo pagination = {
+            page: page,
+            pageSize: pageSize,
+            totalItems: totalCount,
+            totalPages: totalPages,
+            hasNext: page < totalPages,
+            hasPrevious: page > 1
+        };
+
+        return {
+            tasks: paginatedResponses,
+            pagination: pagination
+        };
+    }
+
+    # Sort task responses in memory
+    #
+    # + tasks - Array of task responses to sort
+    # + sortBy - Field to sort by
+    # + sortOrder - Sort order (asc/desc)
+    # + return - Sorted array of task responses
+    private function sortTaskResponses(TaskResponse[] tasks, string sortBy, string sortOrder) returns TaskResponse[] {
+        // Simple bubble sort implementation for demonstration
+        // In production, you might want to use a more efficient sorting algorithm
+        
+        TaskResponse[] sortedTasks = tasks.clone();
+        int n = sortedTasks.length();
+        
+        foreach int i in 0..<n-1 {
+            foreach int j in 0..<n-i-1 {
+                boolean shouldSwap = false;
+                
+                match sortBy {
+                    "title" => {
+                        shouldSwap = (sortOrder == "asc") ? 
+                            sortedTasks[j].title > sortedTasks[j+1].title :
+                            sortedTasks[j].title < sortedTasks[j+1].title;
+                    }
+                    "dueDate" => {
+                        shouldSwap = (sortOrder == "asc") ? 
+                            sortedTasks[j].dueDate > sortedTasks[j+1].dueDate :
+                            sortedTasks[j].dueDate < sortedTasks[j+1].dueDate;
+                    }
+                    "createdAt" => {
+                        shouldSwap = (sortOrder == "asc") ? 
+                            sortedTasks[j].createdAt > sortedTasks[j+1].createdAt :
+                            sortedTasks[j].createdAt < sortedTasks[j+1].createdAt;
+                    }
+                    "updatedAt" => {
+                        shouldSwap = (sortOrder == "asc") ? 
+                            sortedTasks[j].updatedAt > sortedTasks[j+1].updatedAt :
+                            sortedTasks[j].updatedAt < sortedTasks[j+1].updatedAt;
+                    }
+                    "priority" => {
+                        int priority1 = self.getPriorityValue(sortedTasks[j].priority);
+                        int priority2 = self.getPriorityValue(sortedTasks[j+1].priority);
+                        shouldSwap = (sortOrder == "asc") ? 
+                            priority1 > priority2 :
+                            priority1 < priority2;
+                    }
+                    "status" => {
+                        shouldSwap = (sortOrder == "asc") ? 
+                            sortedTasks[j].status > sortedTasks[j+1].status :
+                            sortedTasks[j].status < sortedTasks[j+1].status;
+                    }
+                }
+                
+                if (shouldSwap) {
+                    TaskResponse temp = sortedTasks[j];
+                    sortedTasks[j] = sortedTasks[j+1];
+                    sortedTasks[j+1] = temp;
+                }
+            }
+        }
+        
+        return sortedTasks;
+    }
+
+    # Get numeric value for priority for sorting
+    #
+    # + priority - Priority string
+    # + return - Numeric value (HIGH=3, MEDIUM=2, LOW=1)
+    private function getPriorityValue(string priority) returns int {
+        match priority {
+            "HIGH" => { return 3; }
+            "MEDIUM" => { return 2; }
+            "LOW" => { return 1; }
+            _ => { return 0; }
+        }
     }
 }
