@@ -191,7 +191,7 @@ public class TaskService {
     public function createTask(string userId, CreateTaskRequest request) returns TaskResponse|error {
         log:printInfo("Creating new task: " + request.title);
 
-        // ✅ Enhanced validation
+        // Enhanced validation
         check validateTaskTitle(request.title);
         check validateTaskDescription(request.description);
         check validateEnhancedDate(request.dueDate);
@@ -260,7 +260,7 @@ public class TaskService {
     public function updateTask(string userId, string taskId, UpdateTaskRequest request) returns TaskResponse|error {
         log:printInfo("Updating task: " + taskId);
 
-        // ✅ Validate task ID format
+        // Validate task ID format
         check validateTaskId(taskId);
 
         // Find task
@@ -361,7 +361,7 @@ public class TaskService {
     public function deleteTask(string userId, string taskId) returns boolean|error {
         log:printInfo("Deleting task: " + taskId);
 
-        // ✅ Validate task ID format
+        // Validate task ID format
         check validateTaskId(taskId);
 
         // Find task
@@ -389,7 +389,7 @@ public class TaskService {
     # + taskId - Task ID to retrieve
     # + return - Task response or error
     public function getTaskById(string taskId) returns TaskResponse|error {
-        // ✅ Validate task ID format
+        // Validate task ID format
         check validateTaskId(taskId);
 
         return self.getTaskResponseById(taskId);
@@ -403,7 +403,7 @@ public class TaskService {
     public function listTasks(string userId, TaskFilterOptions filters) returns PaginatedTaskResponse|error {
         log:printInfo("Listing tasks for user: " + userId + " with pagination");
 
-        // ✅ Validate pagination parameters
+        // Validate pagination parameters
         check validatePagination(filters.page, filters.pageSize);
 
         // Build filter
@@ -538,7 +538,7 @@ public class TaskService {
     public function batchDeleteTasks(string userId, string[] taskIds) returns BatchOperationResult|error {
         log:printInfo("Batch deleting tasks for user: " + userId);
 
-        // ✅ Enhanced validation
+        // Enhanced validation
         if (taskIds.length() == 0) {
             return error("Task IDs array cannot be empty");
         }
@@ -607,7 +607,7 @@ public class TaskService {
     public function batchUpdateTaskStatus(string userId, string[] taskIds, TaskStatus status) returns BatchOperationResult|error {
         log:printInfo("Batch updating task status for user: " + userId + " to status: " + <string>status);
 
-        // ✅ Enhanced validation
+        // Enhanced validation
         if (taskIds.length() == 0) {
             return error("Task IDs array cannot be empty");
         }
@@ -681,7 +681,7 @@ public class TaskService {
     public function searchTasks(string userId, string query, TaskFilterOptions filters, boolean isAdmin = false) returns PaginatedTaskResponse|error {
         log:printInfo("Searching tasks with query: " + query);
 
-        // ✅ Enhanced validation
+        // Enhanced validation
         check validateSearchQuery(query);
         check validatePagination(filters.page, filters.pageSize);
 

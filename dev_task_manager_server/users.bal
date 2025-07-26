@@ -1,17 +1,32 @@
 // users.bal
 import ballerina/log;
+import ballerina/regex as re;
 import ballerina/time;
 import ballerina/uuid;
-import ballerina/regex as re;
 import ballerinax/mongodb;
 
 // List of valid timezones
 final string[] validTimezones = [
-    "UTC", "GMT", "EST", "CST", "MST", "PST",
-    "America/New_York", "America/Chicago", "America/Denver", "America/Los_Angeles",
-    "Europe/London", "Europe/Paris", "Europe/Berlin", "Europe/Moscow",
-    "Asia/Tokyo", "Asia/Shanghai", "Asia/Kolkata", "Asia/Dubai",
-    "Australia/Sydney", "Pacific/Auckland"
+    "UTC",
+    "GMT",
+    "EST",
+    "CST",
+    "MST",
+    "PST",
+    "America/New_York",
+    "America/Chicago",
+    "America/Denver",
+    "America/Los_Angeles",
+    "Europe/London",
+    "Europe/Paris",
+    "Europe/Berlin",
+    "Europe/Moscow",
+    "Asia/Tokyo",
+    "Asia/Shanghai",
+    "Asia/Kolkata",
+    "Asia/Dubai",
+    "Australia/Sydney",
+    "Pacific/Auckland"
 ];
 
 # User Validation Helper Functions
@@ -22,47 +37,47 @@ final string[] validTimezones = [
 # + return - Error if invalid, nil if valid
 function validateEmail(string email) returns error? {
     string trimmedEmail = email.trim();
-    
+
     if (trimmedEmail == "") {
         return error("Email cannot be empty");
     }
-    
+
     if (trimmedEmail.length() < 5) {
         return error("Email must be at least 5 characters long");
     }
-    
+
     if (trimmedEmail.length() > 254) {
         return error("Email cannot exceed 254 characters");
     }
-    
+
     // Basic email format validation
     if (!trimmedEmail.includes("@")) {
         return error("Email must contain @ symbol");
     }
-    
+
     string[] parts = re:split(trimmedEmail, "@");
     if (parts.length() != 2) {
         return error("Email format is invalid");
     }
-    
+
     string localPart = parts[0];
     string domainPart = parts[1];
-    
+
     if (localPart == "" || domainPart == "") {
         return error("Email format is invalid");
     }
-    
+
     if (!domainPart.includes(".")) {
         return error("Email domain must contain a dot");
     }
-    
+
     // Check for dangerous characters
-    if (trimmedEmail.includes("<") || trimmedEmail.includes(">") || 
-        trimmedEmail.includes("\"") || trimmedEmail.includes("'") || 
+    if (trimmedEmail.includes("<") || trimmedEmail.includes(">") ||
+        trimmedEmail.includes("\"") || trimmedEmail.includes("'") ||
         trimmedEmail.includes(";") || trimmedEmail.includes(" ")) {
         return error("Email contains invalid characters");
     }
-    
+
     // Convert to lowercase for consistency
     return ();
 }
@@ -75,19 +90,19 @@ function validatePassword(string password) returns error? {
     if (password == "") {
         return error("Password cannot be empty");
     }
-    
+
     if (password.length() < 6) {
         return error("Password must be at least 6 characters long");
     }
-    
+
     if (password.length() > 128) {
         return error("Password cannot exceed 128 characters");
     }
-    
+
     // Check for at least one letter and one number (basic strength)
     boolean hasLetter = false;
     boolean hasNumber = false;
-    
+
     foreach string:Char char in password {
         string charStr = char.toString();
         if ((charStr >= "a" && charStr <= "z") || (charStr >= "A" && charStr <= "Z")) {
@@ -97,19 +112,19 @@ function validatePassword(string password) returns error? {
             hasNumber = true;
         }
     }
-    
+
     if (!hasLetter) {
         return error("Password must contain at least one letter");
     }
-    
+
     if (!hasNumber) {
         return error("Password must contain at least one number");
     }
-    
+
     // Check for common weak passwords
     string lowercasePassword = password.toLowerAscii();
     string[] commonPasswords = ["password", "123456", "password123", "admin", "qwerty", "letmein"];
-    
+
     foreach string common in commonPasswords {
         if (lowercasePassword == common) {
             return error("Password is too common. Please choose a stronger password");
@@ -123,29 +138,29 @@ function validatePassword(string password) returns error? {
 # + return - Error if invalid, nil if valid
 function validateUserName(string name) returns error? {
     string trimmedName = name.trim();
-    
+
     if (trimmedName == "") {
         return error("Name cannot be empty");
     }
-    
+
     if (trimmedName.length() < 2) {
         return error("Name must be at least 2 characters long");
     }
-    
+
     if (trimmedName.length() > 100) {
         return error("Name cannot exceed 100 characters");
     }
-    
+
     // Check for valid characters (letters, spaces, hyphens, apostrophes)
     foreach string:Char char in trimmedName {
         string charStr = char.toString();
-        if (!(charStr >= "a" && charStr <= "z") && 
-            !(charStr >= "A" && charStr <= "Z") && 
+        if (!(charStr >= "a" && charStr <= "z") &&
+            !(charStr >= "A" && charStr <= "Z") &&
             charStr != " " && charStr != "-" && charStr != "'") {
             return error("Name contains invalid characters. Only letters, spaces, hyphens, and apostrophes allowed");
         }
     }
-    
+
     // Check for multiple consecutive spaces
     if (trimmedName.includes("  ")) {
         return error("Name cannot contain multiple consecutive spaces");
@@ -180,17 +195,17 @@ function validateUserId(string userId) returns error? {
     if (userId.trim() == "") {
         return error("User ID cannot be empty");
     }
-    
+
     if (userId.length() < 10) {
         return error("Invalid user ID format");
     }
-    
+
     // Simple UUID-like validation
     foreach string:Char char in userId {
         string charStr = char.toString();
-        if (!(charStr >= "0" && charStr <= "9") && 
-            !(charStr >= "a" && charStr <= "f") && 
-            !(charStr >= "A" && charStr <= "F") && 
+        if (!(charStr >= "0" && charStr <= "9") &&
+            !(charStr >= "a" && charStr <= "f") &&
+            !(charStr >= "A" && charStr <= "F") &&
             charStr != "-") {
             return error("User ID contains invalid characters");
         }
@@ -200,15 +215,15 @@ function validateUserId(string userId) returns error? {
 # User service for managing user operations
 public class UserService {
     private final mongodb:Collection userCollection;
-    
+
     # Initialize user service
     #
     # + userCollection - MongoDB collection for user data
     public function init(mongodb:Collection userCollection) {
         self.userCollection = userCollection;
     }
-    
-    # Register a new user (WITH Enhanced Validation)
+
+    # Register a new user (WITH Enhanced Validation & Security Fix)
     #
     # + request - User registration data
     # + return - Authentication response with token and user info
@@ -228,14 +243,10 @@ public class UserService {
             return error("Email already registered: " + request.email);
         }
 
-        // Validate and determine role
+        // 🔒 SECURITY FIX: Force all new registrations to be USER role only
+        // Ignore any requested role and always set to USER
         string role = "USER";
-        if (request.role is string) {
-            string requestedRole = <string>request.role;
-            check validateUserRole(requestedRole);
-            role = requestedRole;
-        }
-        
+
         // Validate and determine timezone
         string timezone = "UTC";
         if (request.timezone is string) {
@@ -253,7 +264,7 @@ public class UserService {
             email: normalizedEmail, // Store normalized email
             passwordHash: hashedPassword,
             name: request.name.trim(), // Store trimmed name
-            role: role,
+            role: role, // Always USER role
             timezone: timezone,
             createdAt: time:utcToString(time:utcNow())
         };
@@ -279,7 +290,7 @@ public class UserService {
             user: userResponse
         };
     }
-    
+
     # Login existing user (WITH Enhanced Validation)
     #
     # + request - User login credentials
@@ -289,7 +300,7 @@ public class UserService {
 
         // Enhanced validation
         check validateEmail(request.email);
-        
+
         if (request.password == "") {
             return error("Password cannot be empty");
         }
@@ -332,19 +343,19 @@ public class UserService {
             user: userResponse
         };
     }
-    
+
     # Update user timezone (WITH Enhanced Validation)
-    # 
+    #
     # + userId - ID of the user to update
     # + timezone - New timezone
     # + return - Updated user or error
     public function updateUserTimezone(string userId, string timezone) returns UserResponse|error {
         log:printInfo("Updating timezone for user: " + userId);
-        
+
         // Enhanced validation
         check validateUserId(userId);
         check validateTimezone(timezone);
-        
+
         // Find user to update
         User? user = check self.findUserById(userId);
 
@@ -364,7 +375,7 @@ public class UserService {
         // Return updated user profile
         return self.getUserProfile(userId);
     }
-    
+
     # Get user by ID (WITH Enhanced Validation)
     #
     # + userId - User ID to find
@@ -372,13 +383,13 @@ public class UserService {
     public function getUserProfile(string userId) returns UserResponse|error {
         // Enhanced validation
         check validateUserId(userId);
-        
+
         User? user = check self.findUserById(userId);
-        
+
         if user is () {
             return error("User not found with ID: " + userId);
         }
-        
+
         return {
             id: user.id,
             email: user.email,
@@ -387,7 +398,7 @@ public class UserService {
             timezone: user.timezone
         };
     }
-    
+
     # Find user by ID
     #
     # + id - User ID
@@ -404,7 +415,7 @@ public class UserService {
     public function findUsersByEmail(string email) returns User[]|error {
         // Normalize email for search
         string normalizedEmail = email.trim().toLowerAscii();
-        
+
         map<json> filter = {"email": normalizedEmail};
         stream<User, error?> userStream = check self.userCollection->find(filter);
 
@@ -416,13 +427,13 @@ public class UserService {
 
         return users;
     }
-    
+
     # Get all users (admin function)
     #
     # + return - Array of all users
     public function getAllUsers() returns UserResponse[]|error {
         stream<User, error?> userStream = check self.userCollection->find({});
-        
+
         UserResponse[] users = [];
         check from User user in userStream
             do {
@@ -434,10 +445,10 @@ public class UserService {
                     timezone: user.timezone
                 });
             };
-        
+
         return users;
     }
-    
+
     # Check if a user has admin role (WITH Enhanced Validation)
     #
     # + userId - User ID to check
@@ -445,17 +456,17 @@ public class UserService {
     public function checkAdminRole(string userId) returns boolean|error {
         // Enhanced validation
         check validateUserId(userId);
-        
+
         User? user = check self.findUserById(userId);
-        
+
         if user is () {
             return error("User not found with ID: " + userId);
         }
-        
+
         if user.role != "ADMIN" {
             return error("Admin privileges required. Current role: " + user.role);
         }
-        
+
         return true;
     }
 }
