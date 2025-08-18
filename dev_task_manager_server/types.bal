@@ -72,7 +72,7 @@ public type AuthResponse record {|
 public enum TaskStatus {
     TODO = "TODO",
     IN_PROGRESS = "IN_PROGRESS",
-    DONE = "DONE"
+    COMPLETED = "COMPLETED"
 }
 
 # Task priority enum

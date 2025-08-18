@@ -106,7 +106,7 @@ service / on new http:Listener(9090) {
             self.taskService = new TaskService(self.taskCollection, self.userService);
 
             log:printInfo("MongoDB connected successfully");
-            log:printInfo("Server running on http://localhost:9090");
+            log:printInfo("Server running on http://192.168.43.187:9090");
         } on fail error e {
             log:printError("Failed to initialize MongoDB: " + e.message());
             return e;
@@ -513,7 +513,7 @@ service / on new http:Listener(9090) {
             match status.toUpperAscii() {
                 "TODO" => { filters.status = TODO; }
                 "IN_PROGRESS" => { filters.status = IN_PROGRESS; }
-                "DONE" => { filters.status = DONE; }
+                "COMPLETED" => { filters.status = COMPLETED; }
             }
         }
 
