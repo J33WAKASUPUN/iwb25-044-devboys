@@ -865,7 +865,7 @@ public class TaskService {
                     todoCount += 1;
                 } else if (task.status == IN_PROGRESS) {
                     inProgressCount += 1;
-                } else if (task.status == DONE) {
+                } else if (task.status == COMPLETED) {
                     doneCount += 1;
                 }
 
@@ -879,7 +879,7 @@ public class TaskService {
                 }
 
                 // Check if task is overdue
-                if (task.status != DONE && task.dueDate < currentDate) {
+                if (task.status != COMPLETED && task.dueDate < currentDate) {
                     overdueCount += 1;
                 }
             };
