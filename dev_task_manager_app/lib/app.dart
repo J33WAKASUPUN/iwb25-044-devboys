@@ -1,4 +1,3 @@
-import 'package:dev_task_manager_app/blocs/auth/auth_event.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'blocs/auth/auth_bloc.dart';
@@ -24,6 +23,7 @@ class MyApp extends StatelessWidget {
       ],
       child: MaterialApp.router(
         title: 'Dev Task Manager',
+        debugShowCheckedModeBanner: false, // This removes the debug banner
         theme: ThemeData(
           primarySwatch: Colors.blue,
           useMaterial3: true,

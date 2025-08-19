@@ -1,7 +1,8 @@
 class AppConfig {
-  static const String baseUrl = 'http://192.168.43.187:9090';
+  // Update this to your actual IP address
+  static const String baseUrl = 'http://192.168.1.159:9090';
 
-  // API Endpoints matching your Ballerina server routes
+  // Keep the rest unchanged...
   static const String loginEndpoint = '/auth/login';
   static const String registerEndpoint = '/auth/register';
   static const String profileEndpoint = '/profile';
@@ -10,7 +11,6 @@ class AppConfig {
   static const String adminTasksEndpoint = '/admin/tasks';
   static const String adminStatsEndpoint = '/admin/stats/tasks';
 
-  // API timeouts
   static const Duration connectTimeout = Duration(seconds: 30);
   static const Duration receiveTimeout = Duration(seconds: 30);
   static const Duration sendTimeout = Duration(seconds: 30);
