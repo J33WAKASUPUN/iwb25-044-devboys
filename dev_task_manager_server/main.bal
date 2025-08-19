@@ -40,7 +40,7 @@ public function createSuccessResponse(json data, string? message = ()) returns j
         "data": data,
         "timestamp": time:utcToString(time:utcNow())
     };
-    
+
     if (message is string) {
         response = {
             "success": true,
@@ -49,18 +49,44 @@ public function createSuccessResponse(json data, string? message = ()) returns j
             "timestamp": time:utcToString(time:utcNow())
         };
     }
-    
+
     return response;
 }
 
+@http:ServiceConfig {
+    cors: {
+        allowOrigins: ["*"],  // Allow all origins for development
+        allowCredentials: false,
+        allowHeaders: [
+            "CORELATION_ID",
+            "Authorization", 
+            "Content-Type",
+            "Accept",
+            "Origin",
+            "X-Requested-With",
+            "Access-Control-Allow-Origin",
+            "Access-Control-Allow-Headers",
+            "Access-Control-Allow-Methods"
+        ],
+        allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "HEAD", "PATCH"],
+        maxAge: 84900,
+        exposeHeaders: ["*"]
+    }
+}
+
 // Service configuration
-service / on new http:Listener(9090) {
+service / on new http:Listener(9090, {
+    host: "192.168.1.159" // This allows connections from any IP
+}) {
     private final mongodb:Client mongoClient;
     private final mongodb:Database db;
     private final mongodb:Collection userCollection;
     private final mongodb:Collection taskCollection;
     private final UserService userService;
     private final TaskService taskService;
+    private final mongodb:Collection groupCollection;
+    private final mongodb:Collection membershipCollection;
+    private final GroupService groupService;
 
     function init() returns error? {
         log:printInfo("Initializing Dev Tasks Manager API Server...");
@@ -83,48 +109,60 @@ service / on new http:Listener(9090) {
         log:printInfo("Database name: " + dbName);
 
         do {
-            // Initialize MongoDB with proper connection config
+            // Initialize MongoDB
             self.mongoClient = check new mongodb:Client({
                 connection: mongoUri
             });
 
             log:printInfo("MongoDB client initialized successfully");
 
+            // Get collections
             self.db = check self.mongoClient->getDatabase(dbName);
             self.userCollection = check self.db->getCollection("users");
             self.taskCollection = check self.db->getCollection("tasks");
+            self.groupCollection = check self.db->getCollection("groups");
+            self.membershipCollection = check self.db->getCollection("memberships");
 
-            // Create index for unique email - fixed format
+            // Create indices
             check self.userCollection->createIndex({
                 email: 1
             }, {
                 unique: true
             });
 
-            // Initialize services
+            // Create index for unique membership
+            check self.membershipCollection->createIndex({
+                userId: 1,
+                groupId: 1
+            }, {
+                unique: true
+            });
+
+            // Initialize services in correct order
             self.userService = new UserService(self.userCollection);
-            self.taskService = new TaskService(self.taskCollection, self.userService);
+            self.groupService = new GroupService(self.groupCollection, self.membershipCollection, self.userService);
+            self.taskService = new TaskService(self.taskCollection, self.userService, self.groupService);
 
             log:printInfo("MongoDB connected successfully");
-            log:printInfo("Server running on http://192.168.43.187:9090");
+            log:printInfo("Server running on http://localhost:9090");
         } on fail error e {
             log:printError("Failed to initialize MongoDB: " + e.message());
             return e;
         }
     }
 
-    #  Health check endpoint - Basic server health
+    # Health check endpoint - Basic server health
     #
     # + return - Server health status
     resource function get health() returns json {
         string currentTime = time:utcToString(time:utcNow());
-        
+
         // Test MongoDB connection
         boolean dbHealthy = true;
         string dbStatus = "connected";
         int userCount = 0;
         int taskCount = 0;
-        
+
         do {
             // Simple ping to check if DB is responsive
             userCount = check self.userCollection->countDocuments({});
@@ -133,7 +171,7 @@ service / on new http:Listener(9090) {
             dbHealthy = false;
             dbStatus = "disconnected: " + e.message();
         }
-        
+
         return {
             "status": dbHealthy ? "healthy" : "degraded",
             "timestamp": currentTime,
@@ -153,7 +191,7 @@ service / on new http:Listener(9090) {
             "uptime": currentTime, // Simple uptime for now
             "features": [
                 "user-authentication",
-                "task-management", 
+                "task-management",
                 "admin-panel",
                 "health-monitoring"
             ]
@@ -167,31 +205,31 @@ service / on new http:Listener(9090) {
     resource function get health/detailed(http:Request req) returns json|error {
         // Check authentication
         string|error userId = extractUserIdFromToken(req);
-        
+
         if userId is error {
             return createErrorResponse("AUTH_REQUIRED", "Authentication required", {"reason": "Missing or invalid token"});
         }
-        
+
         // Check admin role
         boolean|error isAdmin = self.userService.checkAdminRole(userId);
-        
+
         if isAdmin is error {
             return createErrorResponse("ADMIN_REQUIRED", "Admin access required", {"userRole": "USER"});
         }
-        
+
         string currentTime = time:utcToString(time:utcNow());
-        
+
         // Test all collections and get detailed stats
         map<json> dbDetails = {};
         map<json> systemHealth = {};
-        
+
         do {
             int userCount = check self.userCollection->countDocuments({});
             int taskCount = check self.taskCollection->countDocuments({});
-            
+
             // Get task statistics
             TaskStatistics stats = check self.taskService.getTaskStatistics(userId, true);
-            
+
             dbDetails = {
                 "users_total": userCount,
                 "tasks_total": taskCount,
@@ -200,13 +238,13 @@ service / on new http:Listener(9090) {
                 "overdue_tasks": stats.overdue,
                 "last_checked": currentTime
             };
-            
+
             systemHealth = {
                 "database_responsive": true,
                 "collections_accessible": true,
                 "indexes_working": true
             };
-            
+
         } on fail error e {
             dbDetails = {
                 "error": e.message(),
@@ -217,29 +255,29 @@ service / on new http:Listener(9090) {
                 "error": e.message()
             };
         }
-        
+
         return createSuccessResponse({
-            "server": {
-                "name": "Dev Task Manager API",
-                "version": "1.0.0",
-                "environment": "development",
-                "uptime": currentTime
-            },
-            "database": {
-                "status": "connected",
-                "details": dbDetails
-            },
-            "system": systemHealth,
-            "endpoints": {
-                "total": 16,
-                "categories": {
-                    "auth": 2,
-                    "tasks": 8,
-                    "admin": 4,
-                    "health": 2
-                }
-            }
-        }, "System health check completed successfully");
+                                         "server": {
+                                             "name": "Dev Task Manager API",
+                                             "version": "1.0.0",
+                                             "environment": "development",
+                                             "uptime": currentTime
+                                         },
+                                         "database": {
+                                             "status": "connected",
+                                             "details": dbDetails
+                                         },
+                                         "system": systemHealth,
+                                         "endpoints": {
+                                             "total": 16,
+                                             "categories": {
+                                                 "auth": 2,
+                                                 "tasks": 8,
+                                                 "admin": 4,
+                                                 "health": 2
+                                             }
+                                         }
+                                     }, "System health check completed successfully");
     }
 
     # User registration endpoint (WITH Better Error Handling)
@@ -248,10 +286,10 @@ service / on new http:Listener(9090) {
     # + return - Response with user info and token
     resource function post auth/register(@http:Payload RegisterRequest request) returns json|error {
         AuthResponse|error result = self.userService.register(request);
-        
+
         if result is error {
             string errorMsg = result.message();
-            
+
             // Categorize different types of errors
             if (errorMsg.includes("Email already registered")) {
                 return createErrorResponse("EMAIL_EXISTS", errorMsg, {"field": "email"});
@@ -265,7 +303,7 @@ service / on new http:Listener(9090) {
                 return createErrorResponse("REGISTRATION_FAILED", errorMsg);
             }
         }
-        
+
         return createSuccessResponse(result, "User registered successfully");
     }
 
@@ -275,10 +313,10 @@ service / on new http:Listener(9090) {
     # + return - Response with user info and token
     resource function post auth/login(@http:Payload LoginRequest request) returns json|error {
         AuthResponse|error result = self.userService.login(request);
-        
+
         if result is error {
             string errorMsg = result.message();
-            
+
             if (errorMsg.includes("Invalid email or password")) {
                 return createErrorResponse("INVALID_CREDENTIALS", "Invalid email or password", {"field": "credentials"});
             } else if (errorMsg.includes("Email is required")) {
@@ -289,7 +327,7 @@ service / on new http:Listener(9090) {
                 return createErrorResponse("LOGIN_FAILED", errorMsg);
             }
         }
-        
+
         return createSuccessResponse(result, "Login successful");
     }
 
@@ -327,10 +365,10 @@ service / on new http:Listener(9090) {
 
         // Return user profile with tasks
         return createSuccessResponse({
-            "profile": profile,
-            "recent_tasks": tasks.tasks,
-            "tasks_pagination": tasks.pagination
-        }, "Profile retrieved successfully");
+                                         "profile": profile,
+                                         "recent_tasks": tasks.tasks,
+                                         "tasks_pagination": tasks.pagination
+                                     }, "Profile retrieved successfully");
     }
 
     # Create a new task (WITH Better Error Handling)
@@ -347,10 +385,10 @@ service / on new http:Listener(9090) {
         }
 
         TaskResponse|error result = self.taskService.createTask(userId, request);
-        
+
         if result is error {
             string errorMsg = result.message();
-            
+
             if (errorMsg.includes("Title is required")) {
                 return createErrorResponse("MISSING_FIELD", errorMsg, {"field": "title"});
             } else if (errorMsg.includes("Due date is required")) {
@@ -363,7 +401,7 @@ service / on new http:Listener(9090) {
                 return createErrorResponse("TASK_CREATION_FAILED", errorMsg);
             }
         }
-        
+
         return createSuccessResponse(result, "Task created successfully");
     }
 
@@ -382,10 +420,10 @@ service / on new http:Listener(9090) {
         }
 
         TaskResponse|error result = self.taskService.updateTask(userId, taskId, request);
-        
+
         if result is error {
             string errorMsg = result.message();
-            
+
             if (errorMsg.includes("Task not found")) {
                 return createErrorResponse("TASK_NOT_FOUND", errorMsg, {"taskId": taskId});
             } else if (errorMsg.includes("Not authorized")) {
@@ -398,7 +436,7 @@ service / on new http:Listener(9090) {
                 return createErrorResponse("TASK_UPDATE_FAILED", errorMsg);
             }
         }
-        
+
         return createSuccessResponse(result, "Task updated successfully");
     }
 
@@ -419,7 +457,7 @@ service / on new http:Listener(9090) {
 
         if result is error {
             string errorMsg = result.message();
-            
+
             if (errorMsg.includes("Task not found")) {
                 return createErrorResponse("TASK_NOT_FOUND", errorMsg, {"taskId": taskId});
             } else if (errorMsg.includes("Not authorized")) {
@@ -446,11 +484,11 @@ service / on new http:Listener(9090) {
         }
 
         TaskResponse|error result = self.taskService.getTaskById(taskId);
-        
+
         if result is error {
             return createErrorResponse("TASK_NOT_FOUND", result.message(), {"taskId": taskId});
         }
-        
+
         return createSuccessResponse(result, "Task retrieved successfully");
     }
 
@@ -496,13 +534,27 @@ service / on new http:Listener(9090) {
 
         // Parse and validate sortBy parameter
         match sortBy.toLowerAscii() {
-            "duedate" => { filters.sortBy = DUE_DATE; }
-            "priority" => { filters.sortBy = PRIORITY; }
-            "status" => { filters.sortBy = STATUS; }
-            "createdat" => { filters.sortBy = CREATED_AT; }
-            "updatedat" => { filters.sortBy = UPDATED_AT; }
-            "title" => { filters.sortBy = TITLE; }
-            _ => { filters.sortBy = DUE_DATE; } // Default
+            "duedate" => {
+                filters.sortBy = DUE_DATE;
+            }
+            "priority" => {
+                filters.sortBy = PRIORITY;
+            }
+            "status" => {
+                filters.sortBy = STATUS;
+            }
+            "createdat" => {
+                filters.sortBy = CREATED_AT;
+            }
+            "updatedat" => {
+                filters.sortBy = UPDATED_AT;
+            }
+            "title" => {
+                filters.sortBy = TITLE;
+            }
+            _ => {
+                filters.sortBy = DUE_DATE;
+            } // Default
         }
 
         // Parse and validate sortOrder parameter
@@ -511,18 +563,30 @@ service / on new http:Listener(9090) {
         // Parse status filter
         if (status is string) {
             match status.toUpperAscii() {
-                "TODO" => { filters.status = TODO; }
-                "IN_PROGRESS" => { filters.status = IN_PROGRESS; }
-                "COMPLETED" => { filters.status = COMPLETED; }
+                "TODO" => {
+                    filters.status = TODO;
+                }
+                "IN_PROGRESS" => {
+                    filters.status = IN_PROGRESS;
+                }
+                "DONE" => {
+                    filters.status = DONE;
+                }
             }
         }
 
         // Parse priority filter
         if (priority is string) {
             match priority.toUpperAscii() {
-                "LOW" => { filters.priority = LOW; }
-                "MEDIUM" => { filters.priority = MEDIUM; }
-                "HIGH" => { filters.priority = HIGH; }
+                "LOW" => {
+                    filters.priority = LOW;
+                }
+                "MEDIUM" => {
+                    filters.priority = MEDIUM;
+                }
+                "HIGH" => {
+                    filters.priority = HIGH;
+                }
             }
         }
 
@@ -533,11 +597,11 @@ service / on new http:Listener(9090) {
         filters.createdBy = createdBy;
 
         PaginatedTaskResponse|error result = self.taskService.listTasks(userId, filters);
-        
+
         if result is error {
             return createErrorResponse("TASK_LIST_FAILED", result.message());
         }
-        
+
         return createSuccessResponse(result, "Tasks retrieved successfully");
     }
 
@@ -571,23 +635,37 @@ service / on new http:Listener(9090) {
 
         // Parse sort parameters
         match sortBy.toLowerAscii() {
-            "duedate" => { filters.sortBy = DUE_DATE; }
-            "priority" => { filters.sortBy = PRIORITY; }
-            "status" => { filters.sortBy = STATUS; }
-            "createdat" => { filters.sortBy = CREATED_AT; }
-            "updatedat" => { filters.sortBy = UPDATED_AT; }
-            "title" => { filters.sortBy = TITLE; }
-            _ => { filters.sortBy = DUE_DATE; }
+            "duedate" => {
+                filters.sortBy = DUE_DATE;
+            }
+            "priority" => {
+                filters.sortBy = PRIORITY;
+            }
+            "status" => {
+                filters.sortBy = STATUS;
+            }
+            "createdat" => {
+                filters.sortBy = CREATED_AT;
+            }
+            "updatedat" => {
+                filters.sortBy = UPDATED_AT;
+            }
+            "title" => {
+                filters.sortBy = TITLE;
+            }
+            _ => {
+                filters.sortBy = DUE_DATE;
+            }
         }
 
         filters.sortOrder = sortOrder.toLowerAscii() == "desc" ? DESC : ASC;
 
         PaginatedTaskResponse|error result = self.taskService.listTasks(userId, filters);
-        
+
         if result is error {
             return createErrorResponse("ASSIGNED_TASKS_FAILED", result.message());
         }
-        
+
         return createSuccessResponse(result, "Assigned tasks retrieved successfully");
     }
 
@@ -615,18 +693,18 @@ service / on new http:Listener(9090) {
 
         // Perform batch delete
         BatchOperationResult|error result = self.taskService.batchDeleteTasks(userId, request.taskIds);
-        
+
         if result is error {
             return createErrorResponse("BATCH_DELETE_FAILED", result.message());
         }
 
         // Create response
         string message = string `Batch delete completed: ${result.successful} successful, ${result.failed} failed`;
-        
+
         return createSuccessResponse({
-            "operation": "batch_delete",
-            "result": result
-        }, message);
+                                         "operation": "batch_delete",
+                                         "result": result
+                                     }, message);
     }
 
     # Batch update status of multiple tasks (WITH Better Error Handling)
@@ -653,7 +731,7 @@ service / on new http:Listener(9090) {
 
         // Perform batch status update
         BatchOperationResult|error result = self.taskService.batchUpdateTaskStatus(userId, request.taskIds, request.status);
-        
+
         if result is error {
             return createErrorResponse("BATCH_UPDATE_FAILED", result.message());
         }
@@ -661,12 +739,12 @@ service / on new http:Listener(9090) {
         // Create response
         string statusStr = <string>request.status;
         string message = string `Batch status update to ${statusStr} completed: ${result.successful} successful, ${result.failed} failed`;
-        
+
         return createSuccessResponse({
-            "operation": "batch_status_update",
-            "new_status": statusStr,
-            "result": result
-        }, message);
+                                         "operation": "batch_status_update",
+                                         "new_status": statusStr,
+                                         "result": result
+                                     }, message);
     }
 
     # Search tasks by text with pagination (WITH Better Error Handling)
@@ -713,28 +791,42 @@ service / on new http:Listener(9090) {
 
         // Parse sort parameters
         match sortBy.toLowerAscii() {
-            "duedate" => { filters.sortBy = DUE_DATE; }
-            "priority" => { filters.sortBy = PRIORITY; }
-            "status" => { filters.sortBy = STATUS; }
-            "createdat" => { filters.sortBy = CREATED_AT; }
-            "updatedat" => { filters.sortBy = UPDATED_AT; }
-            "title" => { filters.sortBy = TITLE; }
-            _ => { filters.sortBy = DUE_DATE; }
+            "duedate" => {
+                filters.sortBy = DUE_DATE;
+            }
+            "priority" => {
+                filters.sortBy = PRIORITY;
+            }
+            "status" => {
+                filters.sortBy = STATUS;
+            }
+            "createdat" => {
+                filters.sortBy = CREATED_AT;
+            }
+            "updatedat" => {
+                filters.sortBy = UPDATED_AT;
+            }
+            "title" => {
+                filters.sortBy = TITLE;
+            }
+            _ => {
+                filters.sortBy = DUE_DATE;
+            }
         }
 
         filters.sortOrder = sortOrder.toLowerAscii() == "desc" ? DESC : ASC;
 
         // Search tasks with appropriate permissions
         PaginatedTaskResponse|error result = self.taskService.searchTasks(userId, query, filters, isAdmin);
-        
+
         if result is error {
             return createErrorResponse("SEARCH_FAILED", result.message(), {"query": query});
         }
-        
+
         return createSuccessResponse({
-            "search_query": query,
-            "results": result
-        }, "Search completed successfully");
+                                         "search_query": query,
+                                         "results": result
+                                     }, "Search completed successfully");
     }
 
     # Admin endpoint: Get all users (admin only) (WITH Better Error Handling)
@@ -758,15 +850,15 @@ service / on new http:Listener(9090) {
 
         // Get all users
         UserResponse[]|error result = self.userService.getAllUsers();
-        
+
         if result is error {
             return createErrorResponse("USERS_FETCH_FAILED", result.message());
         }
-        
+
         return createSuccessResponse({
-            "users": result,
-            "total_count": result.length()
-        }, "All users retrieved successfully");
+                                         "users": result,
+                                         "total_count": result.length()
+                                     }, "All users retrieved successfully");
     }
 
     # Admin endpoint: Get all tasks with pagination (admin only) (WITH Better Error Handling)
@@ -806,13 +898,27 @@ service / on new http:Listener(9090) {
 
         // Parse sort parameters
         match sortBy.toLowerAscii() {
-            "duedate" => { filters.sortBy = DUE_DATE; }
-            "priority" => { filters.sortBy = PRIORITY; }
-            "status" => { filters.sortBy = STATUS; }
-            "createdat" => { filters.sortBy = CREATED_AT; }
-            "updatedat" => { filters.sortBy = UPDATED_AT; }
-            "title" => { filters.sortBy = TITLE; }
-            _ => { filters.sortBy = DUE_DATE; }
+            "duedate" => {
+                filters.sortBy = DUE_DATE;
+            }
+            "priority" => {
+                filters.sortBy = PRIORITY;
+            }
+            "status" => {
+                filters.sortBy = STATUS;
+            }
+            "createdat" => {
+                filters.sortBy = CREATED_AT;
+            }
+            "updatedat" => {
+                filters.sortBy = UPDATED_AT;
+            }
+            "title" => {
+                filters.sortBy = TITLE;
+            }
+            _ => {
+                filters.sortBy = DUE_DATE;
+            }
         }
 
         filters.sortOrder = sortOrder.toLowerAscii() == "desc" ? DESC : ASC;
@@ -820,11 +926,11 @@ service / on new http:Listener(9090) {
         // For admin, we need to modify the listTasks method or create a separate admin method
         // For now, let's use a workaround by getting all tasks without user restrictions
         PaginatedTaskResponse|error result = self.getAdminTasks(filters);
-        
+
         if result is error {
             return createErrorResponse("ADMIN_TASKS_FAILED", result.message());
         }
-        
+
         return createSuccessResponse(result, "Admin tasks retrieved successfully");
     }
 
@@ -881,11 +987,11 @@ service / on new http:Listener(9090) {
 
         // Return updated user
         UserResponse|error updatedUser = self.userService.getUserProfile(userId);
-        
+
         if updatedUser is error {
             return createErrorResponse("USER_FETCH_FAILED", updatedUser.message());
         }
-        
+
         return createSuccessResponse(updatedUser, string `User role updated to ${role} successfully`);
     }
 
@@ -910,11 +1016,11 @@ service / on new http:Listener(9090) {
 
         // Get statistics with appropriate permissions
         TaskStatistics|error result = self.taskService.getTaskStatistics(userId, isAdmin);
-        
+
         if result is error {
             return createErrorResponse("STATS_FAILED", result.message());
         }
-        
+
         return createSuccessResponse(result, "Task statistics retrieved successfully");
     }
 
@@ -939,14 +1045,14 @@ service / on new http:Listener(9090) {
 
         // Get base statistics
         TaskStatistics|error stats = self.taskService.getTaskStatistics(userId, true);
-        
+
         if stats is error {
             return createErrorResponse("STATS_FAILED", stats.message());
         }
 
         // Get all users for additional statistics
         UserResponse[]|error users = self.userService.getAllUsers();
-        
+
         if users is error {
             return createErrorResponse("USERS_FETCH_FAILED", users.message());
         }
@@ -971,10 +1077,10 @@ service / on new http:Listener(9090) {
 
         // Return enhanced statistics
         return createSuccessResponse({
-            "basic_stats": stats,
-            "tasks_per_user": tasksPerUser,
-            "total_users": users.length()
-        }, "Detailed task statistics retrieved successfully");
+                                         "basic_stats": stats,
+                                         "tasks_per_user": tasksPerUser,
+                                         "total_users": users.length()
+                                     }, "Detailed task statistics retrieved successfully");
     }
 
     # Update user timezone (WITH Better Error Handling)
@@ -992,10 +1098,10 @@ service / on new http:Listener(9090) {
 
         // Update the timezone
         UserResponse|error result = self.userService.updateUserTimezone(userId, timezone);
-        
+
         if result is error {
             string errorMsg = result.message();
-            
+
             if (errorMsg.includes("Invalid timezone")) {
                 return createErrorResponse("INVALID_TIMEZONE", errorMsg, {"field": "timezone", "provided": timezone});
             } else if (errorMsg.includes("User not found")) {
@@ -1004,7 +1110,7 @@ service / on new http:Listener(9090) {
                 return createErrorResponse("TIMEZONE_UPDATE_FAILED", errorMsg);
             }
         }
-        
+
         return createSuccessResponse(result, "Timezone updated successfully");
     }
 
@@ -1064,5 +1170,339 @@ service / on new http:Listener(9090) {
             tasks: responses,
             pagination: pagination
         };
+    }
+
+    // Add these endpoints to your main.bal file inside the service block
+
+    # Create a new group
+    #
+    # + req - HTTP request with auth token
+    # + request - Group creation request
+    # + return - Created group or error
+    resource function post groups(http:Request req, @http:Payload CreateGroupRequest request) returns json|error {
+        // Check authentication
+        string|error userId = extractUserIdFromToken(req);
+
+        if userId is error {
+            return createErrorResponse("AUTH_REQUIRED", "Authentication required");
+        }
+
+        GroupResponse|error result = self.groupService.createGroup(userId, request);
+
+        if result is error {
+            string errorMsg = result.message();
+
+            if (errorMsg.includes("Group name")) {
+                return createErrorResponse("INVALID_GROUP_NAME", errorMsg, {"field": "name"});
+            } else if (errorMsg.includes("Group description")) {
+                return createErrorResponse("INVALID_DESCRIPTION", errorMsg, {"field": "description"});
+            } else {
+                return createErrorResponse("GROUP_CREATION_FAILED", errorMsg);
+            }
+        }
+
+        return createSuccessResponse(result, "Group created successfully");
+    }
+
+    # Update an existing group
+    #
+    # + req - HTTP request with auth token
+    # + groupId - ID of group to update
+    # + request - Group update request
+    # + return - Updated group or error
+    resource function put groups/[string groupId](http:Request req, @http:Payload UpdateGroupRequest request) returns json|error {
+        // Check authentication
+        string|error userId = extractUserIdFromToken(req);
+
+        if userId is error {
+            return createErrorResponse("AUTH_REQUIRED", "Authentication required");
+        }
+
+        GroupResponse|error result = self.groupService.updateGroup(userId, groupId, request);
+
+        if result is error {
+            string errorMsg = result.message();
+
+            if (errorMsg.includes("Not authorized")) {
+                return createErrorResponse("UNAUTHORIZED", errorMsg, {"action": "only group admin can update"});
+            } else if (errorMsg.includes("Group name")) {
+                return createErrorResponse("INVALID_GROUP_NAME", errorMsg, {"field": "name"});
+            } else if (errorMsg.includes("Group description")) {
+                return createErrorResponse("INVALID_DESCRIPTION", errorMsg, {"field": "description"});
+            } else {
+                return createErrorResponse("GROUP_UPDATE_FAILED", errorMsg);
+            }
+        }
+
+        return createSuccessResponse(result, "Group updated successfully");
+    }
+
+    # Get a group by ID
+    #
+    # + req - HTTP request with auth token
+    # + groupId - ID of group to retrieve
+    # + return - Group details or error
+    resource function get groups/[string groupId](http:Request req) returns json|error {
+        // Check authentication
+        string|error userId = extractUserIdFromToken(req);
+
+        if userId is error {
+            return createErrorResponse("AUTH_REQUIRED", "Authentication required");
+        }
+
+        // Check if user is a member of the group
+        boolean|error isMember = self.groupService.isGroupMember(userId, groupId);
+
+        if isMember is error || !(isMember is boolean && isMember) {
+            return createErrorResponse("UNAUTHORIZED", "Not authorized to view this group. Only members can view.");
+        }
+
+        GroupResponse|error result = self.groupService.getGroupById(groupId);
+
+        if result is error {
+            return createErrorResponse("GROUP_NOT_FOUND", result.message(), {"groupId": groupId});
+        }
+
+        return createSuccessResponse(result, "Group retrieved successfully");
+    }
+
+    # List groups for the current user
+    #
+    # + req - HTTP request with auth token
+    # + return - List of groups or error
+    resource function get groups(http:Request req) returns json|error {
+        // Check authentication
+        string|error userId = extractUserIdFromToken(req);
+
+        if userId is error {
+            return createErrorResponse("AUTH_REQUIRED", "Authentication required");
+        }
+
+        GroupResponse[]|error result = self.groupService.listUserGroups(userId);
+
+        if result is error {
+            return createErrorResponse("GROUPS_FETCH_FAILED", result.message());
+        }
+
+        return createSuccessResponse({
+                                         "groups": result,
+                                         "count": result.length()
+                                     }, "Groups retrieved successfully");
+    }
+
+    # Add a member to a group
+    #
+    # + req - HTTP request with auth token
+    # + groupId - ID of group
+    # + request - Member details to add
+    # + return - Updated group or error
+    resource function post groups/[string groupId]/members(http:Request req, @http:Payload AddGroupMemberRequest request) returns json|error {
+        // Check authentication
+        string|error adminId = extractUserIdFromToken(req);
+
+        if adminId is error {
+            return createErrorResponse("AUTH_REQUIRED", "Authentication required");
+        }
+
+        GroupResponse|error result = self.groupService.addGroupMember(adminId, groupId, request);
+
+        if result is error {
+            string errorMsg = result.message();
+
+            if (errorMsg.includes("Not authorized")) {
+                return createErrorResponse("UNAUTHORIZED", errorMsg, {"action": "only group admin can add members"});
+            } else if (errorMsg.includes("User is already a member")) {
+                return createErrorResponse("MEMBER_EXISTS", errorMsg, {"userId": request.userId});
+            } else if (errorMsg.includes("User not found")) {
+                return createErrorResponse("USER_NOT_FOUND", errorMsg, {"userId": request.userId});
+            } else {
+                return createErrorResponse("ADD_MEMBER_FAILED", errorMsg);
+            }
+        }
+
+        return createSuccessResponse(result, "Member added to group successfully");
+    }
+
+    # Remove a member from a group
+    #
+    # + req - HTTP request with auth token
+    # + groupId - ID of group
+    # + memberId - ID of member to remove
+    # + return - Updated group or error
+    resource function delete groups/[string groupId]/members/[string memberId](http:Request req) returns json|error {
+        // Check authentication
+        string|error adminId = extractUserIdFromToken(req);
+
+        if adminId is error {
+            return createErrorResponse("AUTH_REQUIRED", "Authentication required");
+        }
+
+        GroupResponse|error result = self.groupService.removeGroupMember(adminId, groupId, memberId);
+
+        if result is error {
+            string errorMsg = result.message();
+
+            if (errorMsg.includes("Not authorized")) {
+                return createErrorResponse("UNAUTHORIZED", errorMsg, {"action": "only group admin can remove members"});
+            } else if (errorMsg.includes("User is not a member")) {
+                return createErrorResponse("NOT_A_MEMBER", errorMsg, {"userId": memberId});
+            } else if (errorMsg.includes("Cannot remove the group creator")) {
+                return createErrorResponse("CANNOT_REMOVE_CREATOR", errorMsg, {"userId": memberId});
+            } else {
+                return createErrorResponse("REMOVE_MEMBER_FAILED", errorMsg);
+            }
+        }
+
+        return createSuccessResponse(result, "Member removed from group successfully");
+    }
+
+    # List tasks for a specific group
+    #
+    # + req - HTTP request with auth token
+    # + groupId - ID of group to list tasks for
+    # + status - Filter by status
+    # + priority - Filter by priority
+    # + page - Page number (default: 1)
+    # + pageSize - Number of items per page (default: 10)
+    # + sortBy - Field to sort by (default: dueDate)
+    # + sortOrder - Sort order (default: asc)
+    # + return - Paginated list of group tasks
+    resource function get groups/[string groupId]/tasks(
+            http:Request req,
+            string? status = (),
+            string? priority = (),
+            int page = 1,
+            int pageSize = 10,
+            string sortBy = "dueDate",
+            string sortOrder = "asc"
+) returns json|error {
+        // Check authentication
+        string|error userId = extractUserIdFromToken(req);
+
+        if userId is error {
+            return createErrorResponse("AUTH_REQUIRED", "Authentication required");
+        }
+
+        // Convert query parameters to filter options
+        TaskFilterOptions filters = {
+            groupId: groupId, // Set group ID filter
+            page: page,
+            pageSize: pageSize
+        };
+
+        // Parse and validate sortBy parameter
+        match sortBy.toLowerAscii() {
+            "duedate" => {
+                filters.sortBy = DUE_DATE;
+            }
+            "priority" => {
+                filters.sortBy = PRIORITY;
+            }
+            "status" => {
+                filters.sortBy = STATUS;
+            }
+            "createdat" => {
+                filters.sortBy = CREATED_AT;
+            }
+            "updatedat" => {
+                filters.sortBy = UPDATED_AT;
+            }
+            "title" => {
+                filters.sortBy = TITLE;
+            }
+            _ => {
+                filters.sortBy = DUE_DATE;
+            } // Default
+        }
+
+        // Parse and validate sortOrder parameter
+        filters.sortOrder = sortOrder.toLowerAscii() == "desc" ? DESC : ASC;
+
+        // Parse status filter
+        if (status is string) {
+            match status.toUpperAscii() {
+                "TODO" => {
+                    filters.status = TODO;
+                }
+                "IN_PROGRESS" => {
+                    filters.status = IN_PROGRESS;
+                }
+                "DONE" => {
+                    filters.status = DONE;
+                }
+            }
+        }
+
+        // Parse priority filter
+        if (priority is string) {
+            match priority.toUpperAscii() {
+                "LOW" => {
+                    filters.priority = LOW;
+                }
+                "MEDIUM" => {
+                    filters.priority = MEDIUM;
+                }
+                "HIGH" => {
+                    filters.priority = HIGH;
+                }
+            }
+        }
+
+        PaginatedTaskResponse|error result = self.taskService.listGroupTasks(userId, groupId, filters);
+
+        if result is error {
+            string errorMsg = result.message();
+
+            if (errorMsg.includes("Not authorized")) {
+                return createErrorResponse("UNAUTHORIZED", errorMsg, {"groupId": groupId});
+            } else {
+                return createErrorResponse("GROUP_TASKS_FAILED", errorMsg);
+            }
+        }
+
+        return createSuccessResponse(result, "Group tasks retrieved successfully");
+    }
+
+    # Create a task in a group
+    #
+    # + req - HTTP request with auth token
+    # + groupId - ID of group to create task in
+    # + request - Task creation request
+    # + return - Created task or error
+    resource function post groups/[string groupId]/tasks(http:Request req, @http:Payload CreateTaskRequest request) returns json|error {
+        // Check authentication
+        string|error userId = extractUserIdFromToken(req);
+
+        if userId is error {
+            return createErrorResponse("AUTH_REQUIRED", "Authentication required");
+        }
+
+        // Set the group ID in the request
+        CreateTaskRequest groupTaskRequest = request.clone();
+        groupTaskRequest.groupId = groupId;
+
+        TaskResponse|error result = self.taskService.createTask(userId, groupTaskRequest);
+
+        if result is error {
+            string errorMsg = result.message();
+
+            if (errorMsg.includes("Not authorized")) {
+                return createErrorResponse("UNAUTHORIZED", errorMsg, {"groupId": groupId});
+            } else if (errorMsg.includes("Title is required")) {
+                return createErrorResponse("MISSING_FIELD", errorMsg, {"field": "title"});
+            } else if (errorMsg.includes("Due date is required")) {
+                return createErrorResponse("MISSING_FIELD", errorMsg, {"field": "dueDate"});
+            } else if (errorMsg.includes("Invalid date")) {
+                return createErrorResponse("INVALID_DATE", errorMsg, {"field": "dueDate"});
+            } else if (errorMsg.includes("Assigned user not found")) {
+                return createErrorResponse("USER_NOT_FOUND", errorMsg, {"field": "assignedTo"});
+            } else if (errorMsg.includes("Cannot assign task to a user who is not a member")) {
+                return createErrorResponse("NOT_GROUP_MEMBER", errorMsg, {"field": "assignedTo"});
+            } else {
+                return createErrorResponse("TASK_CREATION_FAILED", errorMsg);
+            }
+        }
+
+        return createSuccessResponse(result, "Group task created successfully");
     }
 }
