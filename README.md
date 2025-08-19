@@ -5,19 +5,25 @@ A modern cross-platform solution for managing development tasks, featuring a Flu
 ## � App Screenshots
 
 ### Dashboard & Task Management
-![Task Manager Home](screenshots/home.png)
+![Task Manager Home](screenshots/home.jpg)
 *Main dashboard showing task statistics, quick actions, and user welcome*
 
 ### User Profile Management
-![User Profile](screenshots/profile.png)
+![User Profile](screenshots/profile.jpg)
 *Profile screen with user information, settings, and account management options*
 
 ### Authentication
-![Login Screen](screenshots/login.png)
+![Login Screen](screenshots/login.jpg)
 *User login interface with email/password authentication and social login options*
 
-![Signup Screen](screenshots/signup.png)
+![Signup Screen](screenshots/signup.jpg)
 *Account creation form with user registration fields and terms acceptance*
+
+![Signup Screen](screenshots/create_task.jpg)
+*Task creation form*
+
+![Signup Screen](screenshots/task_list.jpg)
+*Where show all tasks that been created*
 
 ## �🚀 Features
 
