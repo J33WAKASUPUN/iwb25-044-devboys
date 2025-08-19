@@ -72,7 +72,7 @@ public type AuthResponse record {|
 public enum TaskStatus {
     TODO = "TODO",
     IN_PROGRESS = "IN_PROGRESS",
-    COMPLETED = "COMPLETED"
+    DONE = "DONE"
 }
 
 # Task priority enum
@@ -100,16 +100,17 @@ public enum SortOrder {
 
 # Task record
 #
-# + id - Unique task identifier
-# + title - Task title
-# + description - Task description
-# + status - Current task status
-# + dueDate - Due date in ISO format (YYYY-MM-DD)
-# + priority - Task priority level
-# + createdBy - User ID who created the task
-# + assignedTo - User ID task is assigned to (optional)
-# + createdAt - Task creation timestamp
-# + updatedAt - Last update timestamp
+# + id - Unique task identifier  
+# + title - Task title  
+# + description - Task description  
+# + status - Current task status  
+# + dueDate - Due date in ISO format (YYYY-MM-DD)  
+# + priority - Task priority level  
+# + createdBy - User ID who created the task  
+# + assignedTo - User ID task is assigned to (optional)  
+# + groupId - field description  
+# + createdAt - Task creation timestamp  
+# + updatedAt - Last update timestamp  
 # + timezone - Timezone for date interpretation
 public type Task record {|
     readonly string id;
@@ -120,6 +121,7 @@ public type Task record {|
     TaskPriority priority;
     string createdBy;
     string? assignedTo = ();
+    string? groupId = ();
     string createdAt;
     string updatedAt;
     string timezone = "UTC"; // Added timezone field
@@ -127,17 +129,19 @@ public type Task record {|
 
 # Task response type
 #
-# + id - Unique task identifier
-# + title - Task title
-# + description - Task description
-# + status - Current task status
-# + dueDate - Due date in ISO format
-# + priority - Task priority level
-# + createdBy - User who created the task
-# + assignedTo - User task is assigned to (optional)
-# + createdAt - Task creation timestamp
-# + updatedAt - Last update timestamp
-# + timezone - Timezone for date interpretation
+# + id - Unique task identifier  
+# + title - Task title  
+# + description - Task description  
+# + status - Current task status  
+# + dueDate - Due date in ISO format  
+# + priority - Task priority level  
+# + createdBy - User who created the task  
+# + assignedTo - User task is assigned to (optional)  
+# + groupId - field description  
+# + groupName - field description  
+# + createdAt - Task creation timestamp  
+# + updatedAt - Last update timestamp  
+# + timezone - Timezone for date interpretation  
 # + isOverdue - Whether task is overdue based on current date
 public type TaskResponse record {|
     string id;
@@ -148,6 +152,8 @@ public type TaskResponse record {|
     string priority;
     UserResponse createdBy;
     UserResponse? assignedTo = ();
+    string? groupId = ();
+    string? groupName = ();
     string createdAt;
     string updatedAt;
     string timezone;
@@ -156,11 +162,12 @@ public type TaskResponse record {|
 
 # Create task request
 #
-# + title - Task title
-# + description - Task description
-# + dueDate - Due date in ISO format (YYYY-MM-DD)
-# + priority - Task priority level
-# + assignedTo - User ID task is assigned to (optional)
+# + title - Task title  
+# + description - Task description  
+# + dueDate - Due date in ISO format (YYYY-MM-DD)  
+# + priority - Task priority level  
+# + assignedTo - User ID task is assigned to (optional)  
+# + groupId - field description  
 # + timezone - Timezone for date interpretation (optional)
 public type CreateTaskRequest record {|
     string title;
@@ -168,6 +175,7 @@ public type CreateTaskRequest record {|
     string dueDate;
     TaskPriority priority;
     string? assignedTo = ();
+    string? groupId = ();
     string? timezone = (); // Added timezone field
 |};
 
@@ -209,16 +217,17 @@ public type PaginationInfo record {|
 
 # Task filter options with pagination and sorting
 #
-# + status - Filter by status
-# + priority - Filter by priority
-# + startDate - Filter by due date range (start)
-# + endDate - Filter by due date range (end)
-# + assignedTo - Filter by assignee
-# + createdBy - Filter by creator
-# + page - Page number for pagination (1-based, default: 1)
-# + pageSize - Number of items per page (default: 10, max: 100)
-# + sortBy - Field to sort by (default: dueDate)
-# + sortOrder - Sort order (default: asc)
+# + status - Filter by status  
+# + priority - Filter by priority  
+# + startDate - Filter by due date range (start)  
+# + endDate - Filter by due date range (end)  
+# + assignedTo - Filter by assignee  
+# + createdBy - Filter by creator  
+# + page - Page number for pagination (1-based, default: 1)  
+# + pageSize - Number of items per page (default: 10, max: 100)  
+# + sortBy - Field to sort by (default: dueDate)  
+# + sortOrder - Sort order (default: asc)  
+# + groupId - field description
 public type TaskFilterOptions record {|
     TaskStatus? status = ();
     TaskPriority? priority = ();
@@ -230,6 +239,7 @@ public type TaskFilterOptions record {|
     int pageSize = 10;
     TaskSortBy sortBy = DUE_DATE;
     SortOrder sortOrder = ASC;
+    string? groupId = ();
 |};
 
 # Paginated task list response

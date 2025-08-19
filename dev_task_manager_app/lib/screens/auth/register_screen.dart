@@ -31,7 +31,7 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
   void initState() {
     super.initState();
     _animationController = AnimationController(
-      duration: const Duration(milliseconds: 800),
+      duration: const Duration(milliseconds: 1200),
       vsync: this,
     );
     
@@ -40,15 +40,15 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
       end: 1.0,
     ).animate(CurvedAnimation(
       parent: _animationController,
-      curve: Curves.easeInOut,
+      curve: const Interval(0.0, 0.8, curve: Curves.easeInOut),
     ));
     
     _slideAnimation = Tween<Offset>(
-      begin: const Offset(0, 0.3),
+      begin: const Offset(0, 0.5),
       end: Offset.zero,
     ).animate(CurvedAnimation(
       parent: _animationController,
-      curve: Curves.easeOutCubic,
+      curve: const Interval(0.2, 1.0, curve: Curves.easeOutCubic),
     ));
     
     _animationController.forward();
@@ -57,6 +57,7 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppConstants.backgroundColor,
       body: BlocListener<AuthBloc, AuthState>(
         listener: (context, state) {
           if (state is AuthFailure) {
@@ -66,7 +67,12 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
                   children: [
                     Icon(Icons.error_outline, color: AppConstants.whiteColor),
                     const SizedBox(width: 8),
-                    Expanded(child: Text(state.message)),
+                    Expanded(
+                      child: Text(
+                        state.message,
+                        style: const TextStyle(color: Colors.white),
+                      ),
+                    ),
                   ],
                 ),
                 backgroundColor: AppConstants.errorColor,
@@ -74,6 +80,7 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(AppConstants.borderRadius),
                 ),
+                margin: const EdgeInsets.all(AppConstants.defaultPadding),
               ),
             );
           }
@@ -84,29 +91,29 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
                   children: [
                     Icon(Icons.check_circle, color: AppConstants.whiteColor),
                     const SizedBox(width: 8),
-                    const Text('Account created successfully!'),
+                    const Text(
+                      'Welcome to the dev community!',
+                      style: TextStyle(color: Colors.white),
+                    ),
                   ],
                 ),
-                backgroundColor: AppConstants.primaryColor,
+                backgroundColor: AppConstants.successColor,
                 behavior: SnackBarBehavior.floating,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(AppConstants.borderRadius),
                 ),
+                margin: const EdgeInsets.all(AppConstants.defaultPadding),
               ),
             );
             context.go('/home');
           }
         },
         child: Container(
-          decoration: BoxDecoration(
+          decoration: const BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              colors: [
-                AppConstants.primaryColor.withOpacity(0.1),
-                AppConstants.secondaryColor.withOpacity(0.1),
-                AppConstants.whiteColor,
-              ],
+              colors: AppConstants.backgroundGradient,
             ),
           ),
           child: SafeArea(
@@ -121,7 +128,7 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
                     children: [
                       const SizedBox(height: 20),
                       _buildHeader(),
-                      const SizedBox(height: 30),
+                      const SizedBox(height: 40),
                       _buildRegisterCard(),
                       const SizedBox(height: 24),
                       _buildFooter(),
@@ -140,40 +147,52 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
     return Column(
       children: [
         Container(
-          width: 80,
-          height: 80,
+          width: 90,
+          height: 90,
           decoration: BoxDecoration(
-            color: AppConstants.secondaryColor,
-            borderRadius: BorderRadius.circular(20),
+            gradient: const LinearGradient(
+              colors: [
+                Color(0xFF8B5CF6), // Purple
+                Color(0xFF06B6D4), // Cyan
+              ],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(24),
             boxShadow: [
               BoxShadow(
-                color: AppConstants.secondaryColor.withOpacity(0.3),
+                color: const Color(0xFF8B5CF6).withValues(alpha: 0.3),
                 blurRadius: 20,
-                offset: const Offset(0, 10),
+                offset: const Offset(0, 8),
               ),
             ],
           ),
-          child: Icon(
-            Icons.person_add,
-            size: 40,
-            color: AppConstants.whiteColor,
+          child: const Icon(
+            Icons.rocket_launch,
+            size: 45,
+            color: Colors.white,
           ),
         ),
-        const SizedBox(height: 24),
-        Text(
-          'Create Account',
-          style: AppConstants.headerStyle.copyWith(
-            fontSize: 28,
-            fontWeight: FontWeight.bold,
-            color: AppConstants.primaryColor,
+        const SizedBox(height: 30),
+        ShaderMask(
+          shaderCallback: (bounds) => const LinearGradient(
+            colors: [Color(0xFFE2E8F0), Color(0xFF94A3B8)],
+          ).createShader(bounds),
+          child: Text(
+            'Join DevTask',
+            style: AppConstants.headerStyle.copyWith(
+              fontSize: 32,
+              fontWeight: FontWeight.w800,
+            ),
           ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 12),
         Text(
-          'Join us and start managing your tasks',
+          'Start your development journey with us',
           style: AppConstants.bodyStyle.copyWith(
-            color: Colors.grey[600],
             fontSize: 16,
+            color: AppConstants.textSecondaryColor,
+            fontWeight: FontWeight.w500,
           ),
         ),
       ],
@@ -181,18 +200,39 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
   }
 
   Widget _buildRegisterCard() {
-    return Card(
-      elevation: 8,
-      shadowColor: AppConstants.primaryColor.withOpacity(0.2),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(20),
+    return Container(
+      decoration: BoxDecoration(
+        color: AppConstants.surfaceColor.withValues(alpha: 0.8),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(
+          color: AppConstants.borderColor.withValues(alpha: 0.3),
+          width: 1,
+        ),
+        boxShadow: AppConstants.cardShadow,
       ),
       child: Padding(
         padding: const EdgeInsets.all(AppConstants.largePadding),
         child: Form(
           key: _formKey,
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              Text(
+                'Create Account',
+                style: AppConstants.subHeaderStyle.copyWith(
+                  color: AppConstants.textColor,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Enter your details to get started',
+                style: AppConstants.bodyStyle.copyWith(
+                  color: AppConstants.textSecondaryColor,
+                ),
+              ),
+              const SizedBox(height: 32),
               _buildNameField(),
               const SizedBox(height: 20),
               _buildEmailField(),
@@ -200,13 +240,13 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
               _buildPasswordField(),
               const SizedBox(height: 20),
               _buildConfirmPasswordField(),
-              const SizedBox(height: 16),
+              const SizedBox(height: 20),
               _buildTermsCheckbox(),
               const SizedBox(height: 32),
               _buildRegisterButton(),
-              const SizedBox(height: 16),
+              const SizedBox(height: 24),
               _buildDivider(),
-              const SizedBox(height: 16),
+              const SizedBox(height: 24),
               _buildSocialButtons(),
             ],
           ),
@@ -216,181 +256,199 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
   }
 
   Widget _buildNameField() {
-    return TextFormField(
-      controller: _nameController,
-      keyboardType: TextInputType.name,
-      textCapitalization: TextCapitalization.words,
-      decoration: InputDecoration(
-        labelText: 'Full Name',
-        hintText: 'Enter your full name',
-        prefixIcon: Icon(Icons.person_outline, color: AppConstants.primaryColor),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.grey[300]!),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Full Name',
+          style: AppConstants.bodyStyle.copyWith(
+            color: AppConstants.textColor,
+            fontWeight: FontWeight.w600,
+            fontSize: 14,
+          ),
         ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.grey[300]!),
+        const SizedBox(height: 8),
+        TextFormField(
+          controller: _nameController,
+          keyboardType: TextInputType.name,
+          textCapitalization: TextCapitalization.words,
+          style: const TextStyle(color: AppConstants.textColor),
+          decoration: InputDecoration(
+            hintText: 'John Doe',
+            prefixIcon: Icon(
+              Icons.person_outline,
+              color: AppConstants.textSecondaryColor,
+              size: 20,
+            ),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 16,
+            ),
+          ),
+          validator: (value) {
+            if (value == null || value.isEmpty) {
+              return 'Name is required';
+            }
+            if (value.length < 2) {
+              return 'Name must be at least 2 characters';
+            }
+            return null;
+          },
         ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: AppConstants.primaryColor, width: 2),
-        ),
-        errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: AppConstants.errorColor),
-        ),
-        filled: true,
-        fillColor: Colors.grey[50],
-      ),
-      validator: (value) {
-        if (value == null || value.isEmpty) {
-          return 'Please enter your full name';
-        }
-        if (value.length < 2) {
-          return 'Name must be at least 2 characters';
-        }
-        return null;
-      },
+      ],
     );
   }
 
   Widget _buildEmailField() {
-    return TextFormField(
-      controller: _emailController,
-      keyboardType: TextInputType.emailAddress,
-      decoration: InputDecoration(
-        labelText: 'Email Address',
-        hintText: 'Enter your email',
-        prefixIcon: Icon(Icons.email_outlined, color: AppConstants.primaryColor),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.grey[300]!),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Email',
+          style: AppConstants.bodyStyle.copyWith(
+            color: AppConstants.textColor,
+            fontWeight: FontWeight.w600,
+            fontSize: 14,
+          ),
         ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.grey[300]!),
+        const SizedBox(height: 8),
+        TextFormField(
+          controller: _emailController,
+          keyboardType: TextInputType.emailAddress,
+          style: const TextStyle(color: AppConstants.textColor),
+          decoration: InputDecoration(
+            hintText: 'developer@example.com',
+            prefixIcon: Icon(
+              Icons.alternate_email,
+              color: AppConstants.textSecondaryColor,
+              size: 20,
+            ),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 16,
+            ),
+          ),
+          validator: (value) {
+            if (value == null || value.isEmpty) {
+              return 'Email is required';
+            }
+            if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value)) {
+              return 'Enter a valid email';
+            }
+            return null;
+          },
         ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: AppConstants.primaryColor, width: 2),
-        ),
-        errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: AppConstants.errorColor),
-        ),
-        filled: true,
-        fillColor: Colors.grey[50],
-      ),
-      validator: (value) {
-        if (value == null || value.isEmpty) {
-          return 'Please enter your email';
-        }
-        if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value)) {
-          return 'Please enter a valid email';
-        }
-        return null;
-      },
+      ],
     );
   }
 
   Widget _buildPasswordField() {
-    return TextFormField(
-      controller: _passwordController,
-      obscureText: _obscurePassword,
-      decoration: InputDecoration(
-        labelText: 'Password',
-        hintText: 'Create a password',
-        prefixIcon: Icon(Icons.lock_outline, color: AppConstants.primaryColor),
-        suffixIcon: IconButton(
-          icon: Icon(
-            _obscurePassword ? Icons.visibility_off : Icons.visibility,
-            color: Colors.grey[600],
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Password',
+          style: AppConstants.bodyStyle.copyWith(
+            color: AppConstants.textColor,
+            fontWeight: FontWeight.w600,
+            fontSize: 14,
           ),
-          onPressed: () {
-            setState(() {
-              _obscurePassword = !_obscurePassword;
-            });
+        ),
+        const SizedBox(height: 8),
+        TextFormField(
+          controller: _passwordController,
+          obscureText: _obscurePassword,
+          style: const TextStyle(color: AppConstants.textColor),
+          decoration: InputDecoration(
+            hintText: 'Create a strong password',
+            prefixIcon: Icon(
+              Icons.lock_outline,
+              color: AppConstants.textSecondaryColor,
+              size: 20,
+            ),
+            suffixIcon: IconButton(
+              icon: Icon(
+                _obscurePassword ? Icons.visibility_off : Icons.visibility,
+                color: AppConstants.textSecondaryColor,
+                size: 20,
+              ),
+              onPressed: () {
+                setState(() {
+                  _obscurePassword = !_obscurePassword;
+                });
+              },
+            ),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 16,
+            ),
+          ),
+          validator: (value) {
+            if (value == null || value.isEmpty) {
+              return 'Password is required';
+            }
+            if (value.length < 6) {
+              return 'Password must be at least 6 characters';
+            }
+            return null;
           },
         ),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.grey[300]!),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.grey[300]!),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: AppConstants.primaryColor, width: 2),
-        ),
-        errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: AppConstants.errorColor),
-        ),
-        filled: true,
-        fillColor: Colors.grey[50],
-      ),
-      validator: (value) {
-        if (value == null || value.isEmpty) {
-          return 'Please enter a password';
-        }
-        if (value.length < 6) {
-          return 'Password must be at least 6 characters';
-        }
-        return null;
-      },
+      ],
     );
   }
 
   Widget _buildConfirmPasswordField() {
-    return TextFormField(
-      controller: _confirmPasswordController,
-      obscureText: _obscureConfirmPassword,
-      decoration: InputDecoration(
-        labelText: 'Confirm Password',
-        hintText: 'Confirm your password',
-        prefixIcon: Icon(Icons.lock_outline, color: AppConstants.primaryColor),
-        suffixIcon: IconButton(
-          icon: Icon(
-            _obscureConfirmPassword ? Icons.visibility_off : Icons.visibility,
-            color: Colors.grey[600],
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Confirm Password',
+          style: AppConstants.bodyStyle.copyWith(
+            color: AppConstants.textColor,
+            fontWeight: FontWeight.w600,
+            fontSize: 14,
           ),
-          onPressed: () {
-            setState(() {
-              _obscureConfirmPassword = !_obscureConfirmPassword;
-            });
+        ),
+        const SizedBox(height: 8),
+        TextFormField(
+          controller: _confirmPasswordController,
+          obscureText: _obscureConfirmPassword,
+          style: const TextStyle(color: AppConstants.textColor),
+          decoration: InputDecoration(
+            hintText: 'Confirm your password',
+            prefixIcon: Icon(
+              Icons.lock_outline,
+              color: AppConstants.textSecondaryColor,
+              size: 20,
+            ),
+            suffixIcon: IconButton(
+              icon: Icon(
+                _obscureConfirmPassword ? Icons.visibility_off : Icons.visibility,
+                color: AppConstants.textSecondaryColor,
+                size: 20,
+              ),
+              onPressed: () {
+                setState(() {
+                  _obscureConfirmPassword = !_obscureConfirmPassword;
+                });
+              },
+            ),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 16,
+              vertical: 16,
+            ),
+          ),
+          validator: (value) {
+            if (value == null || value.isEmpty) {
+              return 'Please confirm your password';
+            }
+            if (value != _passwordController.text) {
+              return 'Passwords do not match';
+            }
+            return null;
           },
         ),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.grey[300]!),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.grey[300]!),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: AppConstants.primaryColor, width: 2),
-        ),
-        errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: AppConstants.errorColor),
-        ),
-        filled: true,
-        fillColor: Colors.grey[50],
-      ),
-      validator: (value) {
-        if (value == null || value.isEmpty) {
-          return 'Please confirm your password';
-        }
-        if (value != _passwordController.text) {
-          return 'Passwords do not match';
-        }
-        return null;
-      },
+      ],
     );
   }
 
@@ -398,16 +456,28 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Checkbox(
-          value: _agreeToTerms,
-          onChanged: (value) {
-            setState(() {
-              _agreeToTerms = value ?? false;
-            });
-          },
-          activeColor: AppConstants.primaryColor,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(4),
+        Theme(
+          data: Theme.of(context).copyWith(
+            checkboxTheme: CheckboxThemeData(
+              fillColor: WidgetStateProperty.resolveWith((states) {
+                if (states.contains(WidgetState.selected)) {
+                  return AppConstants.primaryColor;
+                }
+                return Colors.transparent;
+              }),
+              side: const BorderSide(
+                color: AppConstants.borderColor,
+                width: 2,
+              ),
+            ),
+          ),
+          child: Checkbox(
+            value: _agreeToTerms,
+            onChanged: (value) {
+              setState(() {
+                _agreeToTerms = value ?? false;
+              });
+            },
           ),
         ),
         Expanded(
@@ -422,7 +492,7 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
               child: RichText(
                 text: TextSpan(
                   style: AppConstants.bodyStyle.copyWith(
-                    color: Colors.grey[700],
+                    color: AppConstants.textSecondaryColor,
                     fontSize: 14,
                   ),
                   children: [
@@ -457,9 +527,23 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
   Widget _buildRegisterButton() {
     return BlocBuilder<AuthBloc, AuthState>(
       builder: (context, state) {
-        return SizedBox(
+        return Container(
           width: double.infinity,
-          height: 56,
+          height: AppConstants.buttonHeight,
+          decoration: BoxDecoration(
+            gradient: (state is AuthLoading || !_agreeToTerms)
+                ? null 
+                : const LinearGradient(
+                    colors: [
+                      Color(0xFF8B5CF6), // Purple
+                      Color(0xFF06B6D4), // Cyan
+                    ],
+                  ),
+            borderRadius: BorderRadius.circular(AppConstants.smallBorderRadius),
+            color: (state is AuthLoading || !_agreeToTerms) 
+                ? AppConstants.borderColor 
+                : null,
+          ),
           child: ElevatedButton(
             onPressed: (state is AuthLoading || !_agreeToTerms)
                 ? null
@@ -468,7 +552,10 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
                       if (!_agreeToTerms) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
-                            content: const Text('Please agree to the terms and conditions'),
+                            content: const Text(
+                              'Please agree to the terms and conditions',
+                              style: TextStyle(color: Colors.white),
+                            ),
                             backgroundColor: AppConstants.errorColor,
                           ),
                         );
@@ -484,15 +571,12 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
                     }
                   },
             style: ElevatedButton.styleFrom(
-              backgroundColor: _agreeToTerms 
-                  ? AppConstants.primaryColor 
-                  : Colors.grey[400],
-              foregroundColor: AppConstants.whiteColor,
+              backgroundColor: Colors.transparent,
+              foregroundColor: Colors.white,
+              shadowColor: Colors.transparent,
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(AppConstants.smallBorderRadius),
               ),
-              elevation: _agreeToTerms ? 4 : 0,
-              shadowColor: AppConstants.primaryColor.withOpacity(0.3),
             ),
             child: state is AuthLoading
                 ? Row(
@@ -504,25 +588,27 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
                         child: CircularProgressIndicator(
                           strokeWidth: 2,
                           valueColor: AlwaysStoppedAnimation<Color>(
-                            AppConstants.whiteColor,
+                            AppConstants.textSecondaryColor,
                           ),
                         ),
                       ),
                       const SizedBox(width: 12),
-                      const Text('Creating Account...'),
+                      Text(
+                        'Creating Account...',
+                        style: AppConstants.buttonStyle.copyWith(
+                          color: AppConstants.textSecondaryColor,
+                        ),
+                      ),
                     ],
                   )
                 : Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.person_add, size: 20),
+                      const Icon(Icons.rocket_launch, size: 20),
                       const SizedBox(width: 8),
                       Text(
-                        'Create Account',
-                        style: AppConstants.buttonStyle.copyWith(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                        ),
+                        'Join DevTask',
+                        style: AppConstants.buttonStyle,
                       ),
                     ],
                   ),
@@ -535,18 +621,21 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
   Widget _buildDivider() {
     return Row(
       children: [
-        Expanded(child: Divider(color: Colors.grey[300])),
+        Expanded(
+          child: Divider(color: AppConstants.borderColor.withValues(alpha: 0.5)),
+        ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Text(
-            'OR',
+            'or continue with',
             style: AppConstants.bodyStyle.copyWith(
-              color: Colors.grey[600],
-              fontWeight: FontWeight.w500,
+              color: AppConstants.textSecondaryColor,
             ),
           ),
         ),
-        Expanded(child: Divider(color: Colors.grey[300])),
+        Expanded(
+          child: Divider(color: AppConstants.borderColor.withValues(alpha: 0.5)),
+        ),
       ],
     );
   }
@@ -555,41 +644,61 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
     return Row(
       children: [
         Expanded(
-          child: OutlinedButton.icon(
+          child: _buildSocialButton(
+            icon: Icons.g_mobiledata,
+            label: 'Google',
+            color: Colors.red,
             onPressed: () {
-              // TODO: Implement Google sign up
+              // Google sign up functionality will be implemented
             },
-            icon: Icon(Icons.g_mobiledata, color: Colors.red),
-            label: Text('Google'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: Colors.grey[700],
-              side: BorderSide(color: Colors.grey[300]!),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              padding: const EdgeInsets.symmetric(vertical: 12),
-            ),
           ),
         ),
-        const SizedBox(width: 16),
+        const SizedBox(width: 12),
         Expanded(
-          child: OutlinedButton.icon(
+          child: _buildSocialButton(
+            icon: Icons.facebook,
+            label: 'Facebook',
+            color: Colors.blue,
             onPressed: () {
-              // TODO: Implement Facebook sign up
+              // Facebook sign up functionality will be implemented
             },
-            icon: Icon(Icons.facebook, color: Colors.blue),
-            label: Text('Facebook'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: Colors.grey[700],
-              side: BorderSide(color: Colors.grey[300]!),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              padding: const EdgeInsets.symmetric(vertical: 12),
-            ),
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildSocialButton({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onPressed,
+  }) {
+    return Container(
+      height: 50,
+      decoration: BoxDecoration(
+        color: AppConstants.inputFillColor,
+        borderRadius: BorderRadius.circular(AppConstants.smallBorderRadius),
+        border: Border.all(
+          color: AppConstants.borderColor.withValues(alpha: 0.3),
+        ),
+      ),
+      child: TextButton.icon(
+        onPressed: onPressed,
+        icon: Icon(icon, color: color, size: 20),
+        label: Text(
+          label,
+          style: AppConstants.bodyStyle.copyWith(
+            color: AppConstants.textColor,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        style: TextButton.styleFrom(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppConstants.smallBorderRadius),
+          ),
+        ),
+      ),
     );
   }
 
@@ -602,7 +711,7 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
             Text(
               "Already have an account? ",
               style: AppConstants.bodyStyle.copyWith(
-                color: Colors.grey[600],
+                color: AppConstants.textSecondaryColor,
               ),
             ),
             TextButton(
@@ -619,10 +728,9 @@ class _RegisterScreenState extends State<RegisterScreen> with TickerProviderStat
         ),
         const SizedBox(height: 16),
         Text(
-          '© 2024 Dev Task Manager. All rights reserved.',
-          style: AppConstants.bodyStyle.copyWith(
-            color: Colors.grey[500],
-            fontSize: 12,
+          '© 2024 DevTask Manager. Built for developers.',
+          style: AppConstants.captionStyle.copyWith(
+            color: AppConstants.textSecondaryColor.withValues(alpha: 0.7),
           ),
         ),
       ],

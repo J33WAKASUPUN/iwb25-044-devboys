@@ -3,7 +3,7 @@ import 'user.dart';
 
 part 'task.g.dart';
 
-enum TaskStatus { TODO, IN_PROGRESS, COMPLETED }
+enum TaskStatus { TODO, IN_PROGRESS, DONE }
 
 enum TaskPriority { LOW, MEDIUM, HIGH }
 

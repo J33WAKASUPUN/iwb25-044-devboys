@@ -13,7 +13,7 @@ import ballerinax/mongodb;
 function validateTaskTitle(string title) returns error? {
     if (title.trim() == "") {
         return error("Title cannot be empty");
-    }
+   }
 
     if (title.length() < 3) {
         return error("Title must be at least 3 characters long");
@@ -173,17 +173,20 @@ function validateSearchQuery(string query) returns error? {
 public class TaskService {
     private final mongodb:Collection taskCollection;
     private final UserService userService;
+    private final GroupService? groupService;
 
     # Initialize task service
     #
     # + taskCollection - MongoDB collection for task data
     # + userService - User service for user operations
-    public function init(mongodb:Collection taskCollection, UserService userService) {
+    # + groupService - Group service for group operations (optional)
+    public function init(mongodb:Collection taskCollection, UserService userService, GroupService? groupService = ()) {
         self.taskCollection = taskCollection;
         self.userService = userService;
+        self.groupService = groupService;
     }
 
-    # Create a new task (WITH Enhanced Validation)
+    # Create a new task (With Group Support)
     #
     # + userId - ID of user creating the task
     # + request - Task creation data
@@ -209,6 +212,31 @@ public class TaskService {
 
             if assignee is () {
                 return error("Assigned user not found with ID: " + assigneeId);
+            }
+        }
+
+        // Validate group if provided
+        if (request.groupId is string) {
+            string groupId = <string>request.groupId;
+
+            if (self.groupService is GroupService) {
+                // Check if group exists
+                boolean isMember = check (<GroupService>self.groupService).isGroupMember(userId, groupId);
+
+                if (!isMember) {
+                    return error("Not authorized to create task in this group. You must be a member of the group.");
+                }
+
+                // If assignedTo is provided, check if that user is in the group
+                if (request.assignedTo is string) {
+                    boolean isAssigneeMember = check (<GroupService>self.groupService).isGroupMember(<string>request.assignedTo, groupId);
+
+                    if (!isAssigneeMember) {
+                        return error("Cannot assign task to a user who is not a member of the group");
+                    }
+                }
+            } else {
+                return error("Group service is not available");
             }
         }
 
@@ -238,6 +266,7 @@ public class TaskService {
             priority: request.priority,
             createdBy: userId,
             assignedTo: request.assignedTo,
+            groupId: request.groupId,
             createdAt: currentTime,
             updatedAt: currentTime,
             timezone: taskTimezone
@@ -249,6 +278,136 @@ public class TaskService {
 
         // Return enriched task data
         return check self.getTaskResponseById(id);
+    }
+
+    # List tasks for a group
+    #
+    # + userId - ID of user listing tasks
+    # + groupId - ID of group to list tasks for
+    # + filters - Filter, pagination, and sorting options
+    # + return - Paginated task response
+    public function listGroupTasks(string userId, string groupId, TaskFilterOptions filters) returns PaginatedTaskResponse|error {
+        log:printInfo("Listing tasks for group: " + groupId);
+
+        // Check if user is a member of the group
+        if (self.groupService is GroupService) {
+            boolean isMember = check (<GroupService>self.groupService).isGroupMember(userId, groupId);
+
+            if (!isMember) {
+                return error("Not authorized to view tasks in this group. You must be a member of the group.");
+            }
+        } else {
+            return error("Group service is not available");
+        }
+
+        // Validate pagination parameters
+        check validatePagination(filters.page, filters.pageSize);
+
+        // Build filter for group tasks
+        map<json> filter = {"groupId": groupId};
+
+        // Apply additional filters with validation
+        if (filters.status is TaskStatus) {
+            filter["status"] = <string>filters.status;
+        }
+
+        if (filters.priority is TaskPriority) {
+            filter["priority"] = <string>filters.priority;
+        }
+
+        if (filters.assignedTo is string) {
+            string assignedTo = <string>filters.assignedTo;
+            if (assignedTo.trim() != "") {
+                filter["assignedTo"] = assignedTo;
+            }
+        }
+
+        if (filters.createdBy is string) {
+            string createdBy = <string>filters.createdBy;
+            if (createdBy.trim() != "") {
+                filter["createdBy"] = createdBy;
+            }
+        }
+
+        // Validate date range filters
+        if (filters.startDate is string) {
+            string startDate = <string>filters.startDate;
+            check validateEnhancedDate(startDate);
+        }
+
+        if (filters.endDate is string) {
+            string endDate = <string>filters.endDate;
+            check validateEnhancedDate(endDate);
+        }
+
+        // Date range filter with logical validation
+        if (filters.startDate is string && filters.endDate is string) {
+            string startDate = <string>filters.startDate;
+            string endDate = <string>filters.endDate;
+
+            // Ensure start date is before end date
+            if (startDate > endDate) {
+                return error("Start date (" + startDate + ") must be before end date (" + endDate + ")");
+            }
+
+            filter["dueDate"] = {
+                "$gte": startDate,
+                "$lte": endDate
+            };
+        } else if (filters.startDate is string) {
+            filter["dueDate"] = {"$gte": <string>filters.startDate};
+        } else if (filters.endDate is string) {
+            filter["dueDate"] = {"$lte": <string>filters.endDate};
+        }
+
+        // Validate and setup pagination
+        int page = filters.page < 1 ? 1 : filters.page;
+        int pageSize = filters.pageSize < 1 ? 10 : (filters.pageSize > 100 ? 100 : filters.pageSize);
+        int skip = (page - 1) * pageSize;
+
+        // Get total count for pagination
+        int totalCount = check self.taskCollection->countDocuments(filter);
+        int totalPages = totalCount == 0 ? 1 : ((totalCount - 1) / pageSize) + 1;
+
+        // Setup sorting
+        map<json> sortOptions = {};
+        string sortField = <string>filters.sortBy;
+        int sortDirection = <string>filters.sortOrder == "desc" ? -1 : 1;
+        sortOptions[sortField] = sortDirection;
+
+        // Query tasks with pagination and sorting
+        stream<Task, error?> taskStream = check self.taskCollection->find(filter, {
+            "limit": pageSize,
+            "skip": skip,
+            "sort": sortOptions
+        });
+
+        // Convert tasks to responses
+        TaskResponse[] responses = [];
+        error? err = from Task task in taskStream
+            do {
+                TaskResponse response = check self.convertTaskToResponse(task);
+                responses.push(response);
+            };
+
+        if (err is error) {
+            return err;
+        }
+
+        // Create pagination info
+        PaginationInfo pagination = {
+            page: page,
+            pageSize: pageSize,
+            totalItems: totalCount,
+            totalPages: totalPages,
+            hasNext: page < totalPages,
+            hasPrevious: page > 1
+        };
+
+        return {
+            tasks: responses,
+            pagination: pagination
+        };
     }
 
     # Update an existing task (WITH Enhanced Validation)
@@ -408,6 +567,12 @@ public class TaskService {
 
         // Build filter
         map<json> filter = {};
+
+        // If groupId is provided, only list tasks for that group
+        if (filters.groupId is string) {
+            string groupId = <string>filters.groupId;
+            return self.listGroupTasks(userId, groupId, filters);
+        }
 
         // Base filter - tasks are visible to creator or assignee
         json[] accessConditions = [
@@ -795,6 +960,24 @@ public class TaskService {
             assignee = check self.userService.getUserProfile(<string>task.assignedTo);
         }
 
+        // Get group info if present - simplified approach
+        string? groupId = task.groupId;
+        string? groupName = ();
+
+        if (groupId is string && self.groupService is GroupService) {
+            do {
+                log:printInfo("Looking up group name for ID: " + groupId);
+                
+                // Use the new lightweight method
+                string name = check (<GroupService>self.groupService).getGroupNameById(groupId);
+                groupName = name;
+                log:printInfo("Found group name: " + name);
+            } on fail error e {
+                log:printError("Error fetching group name: " + e.message());
+                groupName = "Unknown Group"; // Provide a fallback value instead of null
+            }
+        }
+
         // Check if task is overdue based on current date
         boolean overdue = isTaskOverdue(task.dueDate, <string>task.status);
 
@@ -807,6 +990,8 @@ public class TaskService {
             priority: <string>task.priority,
             createdBy: creator,
             assignedTo: assignee,
+            groupId: groupId,
+            groupName: groupName,
             createdAt: task.createdAt,
             updatedAt: task.updatedAt,
             timezone: task.timezone,
@@ -865,7 +1050,7 @@ public class TaskService {
                     todoCount += 1;
                 } else if (task.status == IN_PROGRESS) {
                     inProgressCount += 1;
-                } else if (task.status == COMPLETED) {
+                } else if (task.status == DONE) {
                     doneCount += 1;
                 }
 
@@ -879,7 +1064,7 @@ public class TaskService {
                 }
 
                 // Check if task is overdue
-                if (task.status != COMPLETED && task.dueDate < currentDate) {
+                if (task.status != DONE && task.dueDate < currentDate) {
                     overdueCount += 1;
                 }
             };

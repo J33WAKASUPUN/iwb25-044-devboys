@@ -18,7 +18,11 @@ class TaskDetailScreen extends StatefulWidget {
   State<TaskDetailScreen> createState() => _TaskDetailScreenState();
 }
 
-class _TaskDetailScreenState extends State<TaskDetailScreen> {
+class _TaskDetailScreenState extends State<TaskDetailScreen> with TickerProviderStateMixin {
+  late AnimationController _animationController;
+  late Animation<double> _fadeAnimation;
+  late Animation<Offset> _slideAnimation;
+  
   Task? _task;
   bool _isLoading = true;
   String? _error;
@@ -26,7 +30,35 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
   @override
   void initState() {
     super.initState();
+    _animationController = AnimationController(
+      duration: const Duration(milliseconds: 1200),
+      vsync: this,
+    );
+    
+    _fadeAnimation = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(
+      parent: _animationController,
+      curve: Curves.easeInOut,
+    ));
+
+    _slideAnimation = Tween<Offset>(
+      begin: const Offset(0, 0.1),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(
+      parent: _animationController,
+      curve: Curves.easeOutCubic,
+    ));
+    
     _loadTask();
+    _animationController.forward();
+  }
+
+  @override
+  void dispose() {
+    _animationController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadTask() async {
@@ -36,7 +68,6 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
     });
 
     try {
-      // Get task from TaskBloc
       final taskBloc = context.read<TaskBloc>();
       final task = taskBloc.getTaskById(widget.taskId);
 
@@ -63,277 +94,404 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppConstants.backgroundColor,
-      appBar: AppBar(
-        title: Text(
-          _task?.title ?? 'Task Details',
-          style: AppConstants.headerStyle,
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: AppConstants.backgroundGradient,
+          ),
         ),
-        backgroundColor: AppConstants.whiteColor,
-        elevation: 2,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () {
-            if (Navigator.of(context).canPop()) {
-              Navigator.of(context).pop();
-            } else {
-              context.go('/tasks');
-            }
-          },
+        child: SafeArea(
+          child: BlocListener<TaskBloc, TaskState>(
+            listener: (context, state) {
+              if (state is TaskOperationSuccess) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Row(
+                      children: [
+                        Icon(Icons.check_circle, color: AppConstants.whiteColor),
+                        const SizedBox(width: 8),
+                        Text(
+                          state.message,
+                          style: const TextStyle(color: Colors.white),
+                        ),
+                      ],
+                    ),
+                    backgroundColor: AppConstants.successColor,
+                    behavior: SnackBarBehavior.floating,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    margin: const EdgeInsets.all(16),
+                  ),
+                );
+                _loadTask();
+              } else if (state is TaskError) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Row(
+                      children: [
+                        Icon(Icons.error_outline, color: AppConstants.whiteColor),
+                        const SizedBox(width: 8),
+                        Text(
+                          state.message,
+                          style: const TextStyle(color: Colors.white),
+                        ),
+                      ],
+                    ),
+                    backgroundColor: AppConstants.errorColor,
+                    behavior: SnackBarBehavior.floating,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    margin: const EdgeInsets.all(16),
+                  ),
+                );
+              }
+            },
+            child: _isLoading
+                ? _buildLoadingState()
+                : _error != null
+                    ? _buildErrorState()
+                    : _buildTaskDetails(),
+          ),
         ),
-        actions: [
-          if (_task != null) ...[
-            IconButton(
-              icon: Icon(Icons.edit, color: AppConstants.primaryColor),
-              onPressed: () => context.go('/tasks/${widget.taskId}/edit'),
+      ),
+    );
+  }
+
+  Widget _buildLoadingState() {
+    return Center(
+      child: Container(
+        padding: const EdgeInsets.all(32),
+        decoration: BoxDecoration(
+          color: AppConstants.surfaceColor.withOpacity(0.8),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: AppConstants.borderColor.withOpacity(0.3),
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: AppConstants.primaryGradient,
+                ),
+                borderRadius: BorderRadius.circular(24),
+              ),
+              child: const Center(
+                child: SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                  ),
+                ),
+              ),
             ),
-            IconButton(
-              icon: Icon(Icons.delete, color: AppConstants.errorColor),
-              onPressed: _showDeleteDialog,
+            const SizedBox(height: 16),
+            Text(
+              'Loading task details...',
+              style: AppConstants.bodyStyle.copyWith(
+                color: AppConstants.textSecondaryColor,
+              ),
             ),
           ],
-        ],
+        ),
       ),
-      body: BlocListener<TaskBloc, TaskState>(
-        listener: (context, state) {
-          if (state is TaskOperationSuccess) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(state.message),
-                backgroundColor: AppConstants.primaryColor,
+    );
+  }
+
+  Widget _buildErrorState() {
+    return Center(
+      child: Container(
+        margin: const EdgeInsets.all(20),
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: AppConstants.surfaceColor.withOpacity(0.8),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: AppConstants.errorColor.withOpacity(0.3),
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppConstants.errorColor.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
               ),
-            );
-            // Reload task data after successful operation
-            _loadTask();
-          } else if (state is TaskError) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(state.message),
-                backgroundColor: AppConstants.errorColor,
+              child: Icon(
+                Icons.error_outline,
+                color: AppConstants.errorColor,
+                size: 32,
               ),
-            );
-          }
-        },
-        child: _isLoading
-            ? const LoadingWidget(message: 'Loading task details...')
-            : _error != null
-                ? ErrorDisplayWidget(
-                    message: _error!,
-                    onRetry: _loadTask,
-                  )
-                : _buildTaskDetails(),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Task Not Found',
+              style: AppConstants.subHeaderStyle.copyWith(
+                color: AppConstants.errorColor,
+                fontSize: 18,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _error!,
+              style: AppConstants.bodyStyle.copyWith(
+                color: AppConstants.textSecondaryColor,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 20),
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: _loadTask,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppConstants.errorColor,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text('Try Again'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TextButton(
+                    onPressed: () => context.go('/tasks'),
+                    style: TextButton.styleFrom(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: Text(
+                      'Back to Tasks',
+                      style: TextStyle(
+                        color: AppConstants.textSecondaryColor,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildTaskDetails() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(AppConstants.defaultPadding),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildHeaderCard(),
-          const SizedBox(height: AppConstants.defaultPadding),
-          _buildDetailsCard(),
-          const SizedBox(height: AppConstants.defaultPadding),
-          _buildStatusCard(),
-          const SizedBox(height: AppConstants.defaultPadding),
-          _buildMetadataCard(),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildHeaderCard() {
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(AppConstants.borderRadius),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(AppConstants.defaultPadding),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  child: Text(
-                    _task!.title,
-                    style: AppConstants.headerStyle.copyWith(fontSize: 20),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                _buildPriorityBadge(),
-              ],
-            ),
-            const SizedBox(height: AppConstants.smallPadding),
-            Text(
-              _task!.description,
-              style: AppConstants.bodyStyle.copyWith(
-                color: Colors.grey[700],
-                fontSize: 16,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildDetailsCard() {
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(AppConstants.borderRadius),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(AppConstants.defaultPadding),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Task Details',
-              style: AppConstants.subHeaderStyle,
-            ),
-            const SizedBox(height: AppConstants.defaultPadding),
-            _buildDetailRow('Due Date', _task!.dueDate, Icons.calendar_today),
-            _buildDetailRow(
-              'Created By',
-              _task!.createdBy.name,
-              Icons.person,
-            ),
-            if (_task!.assignedTo != null)
-              _buildDetailRow(
-                'Assigned To',
-                _task!.assignedTo!.name,
-                Icons.assignment_ind,
-              ),
-            _buildDetailRow(
-              'Created',
-              _formatDate(_task!.createdAt),
-              Icons.access_time,
-            ),
-            _buildDetailRow(
-              'Last Updated',
-              _formatDate(_task!.updatedAt),
-              Icons.update,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildStatusCard() {
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(AppConstants.borderRadius),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(AppConstants.defaultPadding),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'Status',
-                  style: AppConstants.subHeaderStyle,
-                ),
-                _buildStatusBadge(),
-              ],
-            ),
-            const SizedBox(height: AppConstants.defaultPadding),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                onPressed: _showStatusUpdateDialog,
-                icon: const Icon(Icons.edit),
-                label: const Text('Update Status'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppConstants.primaryColor,
-                  foregroundColor: AppConstants.whiteColor,
-                  padding: const EdgeInsets.symmetric(vertical: 12),
+    return FadeTransition(
+      opacity: _fadeAnimation,
+      child: SlideTransition(
+        position: _slideAnimation,
+        child: SingleChildScrollView(
+          child: Column(
+            children: [
+              _buildTopBar(),
+              Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  children: [
+                    _buildTaskHeader(),
+                    const SizedBox(height: 20),
+                    _buildTaskInfo(),
+                    const SizedBox(height: 20),
+                    _buildStatusSection(),
+                    const SizedBox(height: 20),
+                    _buildMetadataSection(),
+                    const SizedBox(height: 20),
+                    _buildActionButtons(),
+                  ],
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _buildMetadataCard() {
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(AppConstants.borderRadius),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(AppConstants.defaultPadding),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Additional Information',
-              style: AppConstants.subHeaderStyle,
-            ),
-            const SizedBox(height: AppConstants.defaultPadding),
-            _buildDetailRow(
-              'Task ID',
-              _task!.id.substring(0, 8),
-              Icons.fingerprint,
-            ),
-            _buildDetailRow(
-              'Overdue',
-              _task!.isOverdue ? 'Yes' : 'No',
-              _task!.isOverdue ? Icons.warning : Icons.check_circle,
-              _task!.isOverdue
-                  ? AppConstants.errorColor
-                  : AppConstants.successColor,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildDetailRow(String label, String value, IconData icon,
-      [Color? textColor]) {
+  Widget _buildTopBar() {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.all(20),
       child: Row(
         children: [
-          Icon(
-            icon,
-            size: 20,
-            color: textColor ?? Colors.grey[600],
+          Container(
+            decoration: BoxDecoration(
+              color: AppConstants.surfaceColor.withOpacity(0.8),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: AppConstants.borderColor.withOpacity(0.3),
+              ),
+            ),
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: () {
+                  if (Navigator.of(context).canPop()) {
+                    Navigator.of(context).pop();
+                  } else {
+                    context.go('/tasks');
+                  }
+                },
+                borderRadius: BorderRadius.circular(12),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Icon(
+                    Icons.arrow_back_ios,
+                    color: AppConstants.textColor,
+                    size: 20,
+                  ),
+                ),
+              ),
+            ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 16),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  label,
-                  style: AppConstants.bodyStyle.copyWith(
-                    fontSize: 12,
-                    color: Colors.grey[600],
-                    fontWeight: FontWeight.w500,
+                  'Task Details',
+                  style: AppConstants.headerStyle.copyWith(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
                 Text(
-                  value,
+                  'View and manage task',
                   style: AppConstants.bodyStyle.copyWith(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: textColor,
+                    color: AppConstants.textSecondaryColor,
+                    fontSize: 12,
                   ),
                 ),
               ],
+            ),
+          ),
+          if (_task != null) ...[
+            Container(
+              decoration: BoxDecoration(
+                color: AppConstants.surfaceColor.withOpacity(0.8),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: AppConstants.borderColor.withOpacity(0.3),
+                ),
+              ),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: () => context.go('/tasks/${widget.taskId}/edit'),
+                  borderRadius: BorderRadius.circular(12),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Icon(
+                      Icons.edit_outlined,
+                      color: AppConstants.primaryColor,
+                      size: 20,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              decoration: BoxDecoration(
+                color: AppConstants.surfaceColor.withOpacity(0.8),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: AppConstants.borderColor.withOpacity(0.3),
+                ),
+              ),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: _showModernDeleteDialog,
+                  borderRadius: BorderRadius.circular(12),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Icon(
+                      Icons.delete_outline,
+                      color: AppConstants.errorColor,
+                      size: 20,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTaskHeader() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: AppConstants.surfaceColor.withOpacity(0.8),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: AppConstants.borderColor.withOpacity(0.3),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Text(
+                  _task!.title,
+                  style: AppConstants.headerStyle.copyWith(
+                    fontSize: 24,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              _buildPriorityBadge(_task!.priority),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppConstants.cardColor.withOpacity(0.3),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: AppConstants.borderColor.withOpacity(0.2),
+              ),
+            ),
+            child: Text(
+              _task!.description,
+              style: AppConstants.bodyStyle.copyWith(
+                color: AppConstants.textColor,
+                fontSize: 16,
+                height: 1.5,
+              ),
             ),
           ),
         ],
@@ -341,22 +499,385 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
     );
   }
 
-  Widget _buildStatusBadge() {
+  Widget _buildTaskInfo() {
     return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppConstants.smallPadding,
-        vertical: 4,
-      ),
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color:
-            AppConstants.statusColors[_task!.status.name]?.withOpacity(0.1) ??
-                Colors.grey.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(6),
+        color: AppConstants.surfaceColor.withOpacity(0.8),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: AppConstants.borderColor.withOpacity(0.3),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: AppConstants.primaryGradient,
+                  ),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(
+                  Icons.info_outline,
+                  color: Colors.white,
+                  size: 16,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                'Task Information',
+                style: AppConstants.subHeaderStyle.copyWith(
+                  color: AppConstants.textColor,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          _buildInfoRow(
+            icon: Icons.calendar_today,
+            label: 'Due Date',
+            value: _formatDate(_task!.dueDate),
+            color: _task!.isOverdue ? AppConstants.errorColor : AppConstants.primaryColor,
+          ),
+          const SizedBox(height: 16),
+          _buildInfoRow(
+            icon: Icons.person_outline,
+            label: 'Created By',
+            value: _task!.createdBy.name,
+            color: AppConstants.primaryColor,
+          ),
+          if (_task!.assignedTo != null) ...[
+            const SizedBox(height: 16),
+            _buildInfoRow(
+              icon: Icons.assignment_ind,
+              label: 'Assigned To',
+              value: _task!.assignedTo!.name,
+              color: AppConstants.successColor,
+            ),
+          ],
+          const SizedBox(height: 16),
+          _buildInfoRow(
+            icon: Icons.access_time,
+            label: 'Created',
+            value: _formatDateTime(_task!.createdAt),
+            color: AppConstants.textSecondaryColor,
+          ),
+          const SizedBox(height: 16),
+          _buildInfoRow(
+            icon: Icons.update,
+            label: 'Last Updated',
+            value: _formatDateTime(_task!.updatedAt),
+            color: AppConstants.textSecondaryColor,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInfoRow({
+    required IconData icon,
+    required String label,
+    required String value,
+    required Color color,
+  }) {
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(
+            icon,
+            size: 16,
+            color: color,
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: AppConstants.captionStyle.copyWith(
+                  color: AppConstants.textSecondaryColor,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                value,
+                style: AppConstants.bodyStyle.copyWith(
+                  color: AppConstants.textColor,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStatusSection() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppConstants.surfaceColor.withOpacity(0.8),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: AppConstants.borderColor.withOpacity(0.3),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF10B981), Color(0xFF06B6D4)],
+                      ),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(
+                      Icons.flag_outlined,
+                      color: Colors.white,
+                      size: 16,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Text(
+                    'Current Status',
+                    style: AppConstants.subHeaderStyle.copyWith(
+                      color: AppConstants.textColor,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+              _buildStatusBadge(_task!.status),
+            ],
+          ),
+          const SizedBox(height: 20),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: _showModernStatusUpdateDialog,
+              icon: const Icon(Icons.edit_outlined, size: 18),
+              label: const Text(
+                'Update Status',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppConstants.primaryColor,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                elevation: 0,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMetadataSection() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: AppConstants.surfaceColor.withOpacity(0.8),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: AppConstants.borderColor.withOpacity(0.3),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFF8B5CF6), Color(0xFFEC4899)],
+                  ),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(
+                  Icons.data_object,
+                  color: Colors.white,
+                  size: 16,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                'Additional Information',
+                style: AppConstants.subHeaderStyle.copyWith(
+                  color: AppConstants.textColor,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              Expanded(
+                child: _buildMetadataCard(
+                  icon: Icons.fingerprint,
+                  label: 'Task ID',
+                  value: _task!.id.substring(0, 8),
+                  color: AppConstants.primaryColor,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildMetadataCard(
+                  icon: _task!.isOverdue ? Icons.warning : Icons.check_circle,
+                  label: 'Status',
+                  value: _task!.isOverdue ? 'Overdue' : 'On Track',
+                  color: _task!.isOverdue ? AppConstants.errorColor : AppConstants.successColor,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMetadataCard({
+    required IconData icon,
+    required String label,
+    required String value,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppConstants.cardColor.withOpacity(0.3),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: color.withOpacity(0.2),
+        ),
+      ),
+      child: Column(
+        children: [
+          Icon(
+            icon,
+            color: color,
+            size: 24,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            value,
+            style: AppConstants.subHeaderStyle.copyWith(
+              fontSize: 16,
+              color: color,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: AppConstants.captionStyle.copyWith(
+              color: AppConstants.textSecondaryColor,
+              fontSize: 10,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActionButtons() {
+    return Row(
+      children: [
+        Expanded(
+          child: ElevatedButton.icon(
+            onPressed: () => context.go('/tasks/${widget.taskId}/edit'),
+            icon: const Icon(Icons.edit_outlined, size: 18),
+            label: const Text(
+              'Edit Task',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppConstants.primaryColor,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              elevation: 0,
+            ),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: OutlinedButton.icon(
+            onPressed: _showModernDeleteDialog,
+            icon: const Icon(Icons.delete_outline, size: 18),
+            label: const Text(
+              'Delete',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+            style: OutlinedButton.styleFrom(
+              side: BorderSide(color: AppConstants.errorColor),
+              foregroundColor: AppConstants.errorColor,
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStatusBadge(TaskStatus status) {
+    Color color = AppConstants.statusColors[status.name] ?? AppConstants.textSecondaryColor;
+    
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: color.withOpacity(0.3),
+        ),
       ),
       child: Text(
-        _task!.status.name.replaceAll('_', ' '),
+        status.name.replaceAll('_', ' '),
         style: TextStyle(
-          color: AppConstants.statusColors[_task!.status.name] ?? Colors.grey,
+          color: color,
           fontSize: 12,
           fontWeight: FontWeight.w600,
         ),
@@ -364,31 +885,50 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
     );
   }
 
-  Widget _buildPriorityBadge() {
+  Widget _buildPriorityBadge(TaskPriority priority) {
+    Color color = AppConstants.priorityColors[priority.name] ?? AppConstants.textSecondaryColor;
+    
     return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppConstants.smallPadding,
-        vertical: 4,
-      ),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: AppConstants.priorityColors[_task!.priority.name]
-                ?.withOpacity(0.1) ??
-            Colors.grey.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(6),
+        color: color.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(8),
       ),
-      child: Text(
-        _task!.priority.name,
-        style: TextStyle(
-          color:
-              AppConstants.priorityColors[_task!.priority.name] ?? Colors.grey,
-          fontSize: 12,
-          fontWeight: FontWeight.w600,
-        ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 6,
+            height: 6,
+            decoration: BoxDecoration(
+              color: color,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            priority.name,
+            style: TextStyle(
+              color: color,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
       ),
     );
   }
 
   String _formatDate(String dateString) {
+    try {
+      final date = DateTime.parse(dateString);
+      return '${date.day}/${date.month}/${date.year}';
+    } catch (e) {
+      return dateString;
+    }
+  }
+
+  String _formatDateTime(String dateString) {
     try {
       final date = DateTime.parse(dateString);
       return '${date.day}/${date.month}/${date.year} ${date.hour}:${date.minute.toString().padLeft(2, '0')}';
@@ -397,43 +937,218 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
     }
   }
 
-  void _showStatusUpdateDialog() {
+  void _showModernStatusUpdateDialog() {
     TaskStatus selectedStatus = _task!.status;
 
     showDialog(
       context: context,
+      barrierColor: Colors.black.withOpacity(0.8),
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Update Status'),
+          backgroundColor: AppConstants.surfaceColor,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          contentPadding: const EdgeInsets.all(24),
           content: Column(
             mainAxisSize: MainAxisSize.min,
-            children: TaskStatus.values.map((status) {
-              return RadioListTile<TaskStatus>(
-                title: Text(status.name.replaceAll('_', ' ')),
-                value: status,
-                groupValue: selectedStatus,
-                onChanged: (value) {
-                  setDialogState(() {
-                    selectedStatus = value!;
-                  });
-                },
-              );
-            }).toList(),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-                _updateTaskStatus(selectedStatus);
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppConstants.primaryColor,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: AppConstants.primaryGradient,
+                  ),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(
+                  Icons.flag_outlined,
+                  color: Colors.white,
+                  size: 24,
+                ),
               ),
-              child: const Text('Update'),
+              const SizedBox(height: 20),
+              Text(
+                'Update Status',
+                style: AppConstants.subHeaderStyle.copyWith(
+                  color: AppConstants.textColor,
+                  fontSize: 18,
+                ),
+              ),
+              const SizedBox(height: 20),
+              ...TaskStatus.values.map((status) {
+                Color statusColor = AppConstants.statusColors[status.name] ?? AppConstants.textSecondaryColor;
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  decoration: BoxDecoration(
+                    color: selectedStatus == status
+                        ? statusColor.withOpacity(0.1)
+                        : AppConstants.cardColor.withOpacity(0.3),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: selectedStatus == status
+                          ? statusColor
+                          : AppConstants.borderColor.withOpacity(0.3),
+                    ),
+                  ),
+                  child: RadioListTile<TaskStatus>(
+                    title: Text(
+                      status.name.replaceAll('_', ' '),
+                      style: TextStyle(
+                        color: AppConstants.textColor,
+                        fontWeight: selectedStatus == status
+                            ? FontWeight.w600
+                            : FontWeight.normal,
+                      ),
+                    ),
+                    value: status,
+                    groupValue: selectedStatus,
+                    activeColor: statusColor,
+                    onChanged: (value) {
+                      setDialogState(() {
+                        selectedStatus = value!;
+                      });
+                    },
+                  ),
+                );
+              }),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      style: TextButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: Text(
+                        'Cancel',
+                        style: TextStyle(
+                          color: AppConstants.textSecondaryColor,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: () {
+                        Navigator.of(context).pop();
+                        _updateTaskStatus(selectedStatus);
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppConstants.primaryColor,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        elevation: 0,
+                      ),
+                      child: const Text(
+                        'Update',
+                        style: TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showModernDeleteDialog() {
+    showDialog(
+      context: context,
+      barrierColor: Colors.black.withOpacity(0.8),
+      builder: (context) => AlertDialog(
+        backgroundColor: AppConstants.surfaceColor,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+        contentPadding: const EdgeInsets.all(24),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppConstants.errorColor.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(
+                Icons.delete_outline,
+                color: AppConstants.errorColor,
+                size: 32,
+              ),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              'Delete Task',
+              style: AppConstants.subHeaderStyle.copyWith(
+                color: AppConstants.textColor,
+                fontSize: 18,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Are you sure you want to delete "${_task!.title}"? This action cannot be undone.',
+              style: AppConstants.bodyStyle.copyWith(
+                color: AppConstants.textSecondaryColor,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            Row(
+              children: [
+                Expanded(
+                  child: TextButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: Text(
+                      'Cancel',
+                      style: TextStyle(
+                        color: AppConstants.textSecondaryColor,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: () {
+                      Navigator.of(context).pop();
+                      _deleteTask();
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppConstants.errorColor,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      elevation: 0,
+                    ),
+                    child: const Text(
+                      'Delete',
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -443,7 +1158,6 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
 
   Future<void> _updateTaskStatus(TaskStatus newStatus) async {
     try {
-      // Use TaskBloc to update status
       final taskBloc = context.read<TaskBloc>();
       taskBloc.add(UpdateTaskStatus(
         taskId: widget.taskId,
@@ -459,39 +1173,11 @@ class _TaskDetailScreenState extends State<TaskDetailScreen> {
     }
   }
 
-  void _showDeleteDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete Task'),
-        content: Text('Are you sure you want to delete "${_task!.title}"?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.of(context).pop();
-              _deleteTask();
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppConstants.errorColor,
-            ),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-  }
-
   Future<void> _deleteTask() async {
     try {
-      // Use TaskBloc to delete task
       final taskBloc = context.read<TaskBloc>();
       taskBloc.add(DeleteTask(taskId: widget.taskId));
 
-      // Navigate back to tasks list
       if (Navigator.of(context).canPop()) {
         Navigator.of(context).pop();
       } else {
